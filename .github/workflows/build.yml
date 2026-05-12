@@ -1,0 +1,97 @@
+name: Build & Validate
+
+on:
+  pull_request:
+    branches:
+      - main
+      - 'release/**'
+
+jobs:
+  # ── Job 1: Build + Unit Tests (no Docker needed) ─────────────────────────
+  unit-tests:
+    name: Build and Unit Tests
+    runs-on: ubuntu-latest
+
+    steps:
+      - name: Checkout repository
+        uses: actions/checkout@v4
+        with:
+          fetch-depth: 0
+
+      - name: Setup .NET 10
+        uses: actions/setup-dotnet@v4
+        with:
+          dotnet-version: '10.0.x'
+
+      - name: Restore dependencies
+        run: dotnet restore ProbahoSSE.sln
+
+      - name: Build solution
+        run: dotnet build ProbahoSSE.sln --configuration Release --no-restore
+
+      - name: Run unit tests
+        run: >
+          dotnet test tests/ProbahoSSE.Tests.Unit/ProbahoSSE.Tests.Unit.csproj
+          --configuration Release
+          --no-build
+          --verbosity normal
+          --logger "trx;LogFileName=unit-results.trx"
+
+      - name: Upload unit test results
+        if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: unit-test-results
+          path: "**/unit-results.trx"
+
+      - name: Verify packable projects produce packages
+        run: dotnet pack ProbahoSSE.sln --configuration Release --no-build --output ./artifacts
+
+      - name: List produced packages
+        run: |
+          echo "Packages produced by this build:"
+          ls -la ./artifacts/*.nupkg
+
+  # ── Job 2: Integration Tests (requires Docker for Testcontainers) ─────────
+  integration-tests:
+    name: Integration Tests (Redis via Testcontainers)
+    runs-on: ubuntu-latest
+    # Docker is available on ubuntu-latest — Testcontainers will use it automatically.
+
+    steps:
+      - name: Checkout repository
+        uses: actions/checkout@v4
+        with:
+          fetch-depth: 0
+
+      - name: Setup .NET 10
+        uses: actions/setup-dotnet@v4
+        with:
+          dotnet-version: '10.0.x'
+
+      - name: Restore dependencies
+        run: dotnet restore ProbahoSSE.sln
+
+      - name: Build solution
+        run: dotnet build ProbahoSSE.sln --configuration Release --no-restore
+
+      - name: Run integration tests
+        # DOTNET_ENVIRONMENT=Development ensures WebApplicationFactory can find the test Program.
+        # TESTCONTAINERS_RYUK_DISABLED=true prevents Ryuk (resource reaper) permission issues on CI.
+        env:
+          DOTNET_ENVIRONMENT: Development
+          TESTCONTAINERS_RYUK_DISABLED: "true"
+        run: >
+          dotnet test tests/ProbahoSSE.Tests.Integration/ProbahoSSE.Tests.Integration.csproj
+          --configuration Release
+          --no-build
+          --verbosity normal
+          --logger "trx;LogFileName=integration-results.trx"
+
+      - name: Upload integration test results
+        if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: integration-test-results
+          path: "**/integration-results.trx"
+

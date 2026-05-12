@@ -1,0 +1,13 @@
+<Project Sdk="Microsoft.NET.Sdk">
+  <PropertyGroup>
+    <IsPackable>true</IsPackable>
+    <PackageId>ProbahoSSE</PackageId>
+    <Description>Core engine for ProbahoSSE — a high-performance .NET 10 Server-Sent Events library with middleware, connection management, and backplane support.</Description>
+  </PropertyGroup>
+  <ItemGroup>
+    <FrameworkReference Include="Microsoft.AspNetCore.App" />
+  </ItemGroup>
+  <!-- Packages already included via Microsoft.AspNetCore.App framework reference -->
+</Project>
+
+

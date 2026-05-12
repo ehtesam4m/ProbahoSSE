@@ -1,0 +1,19 @@
+<Project Sdk="Microsoft.NET.Sdk">
+  <PropertyGroup>
+    <IsPackable>true</IsPackable>
+    <PackageId>ProbahoSSE.RedisStream</PackageId>
+    <Description>Redis Streams backplane for ProbahoSSE — enables at-least-once delivery with message replay using Last-Event-ID recovery.</Description>
+  </PropertyGroup>
+  <ItemGroup>
+    <ProjectReference Include="..\ProbahoSSE\ProbahoSSE.csproj" />
+    <ProjectReference Include="..\ProbahoSSE.Backplane.Redis\ProbahoSSE.Backplane.Redis.csproj" />
+  </ItemGroup>
+  <ItemGroup>
+    <PackageReference Include="StackExchange.Redis" />
+    <PackageReference Include="Microsoft.Extensions.DependencyInjection.Abstractions" />
+    <PackageReference Include="Microsoft.Extensions.Options" />
+    <PackageReference Include="Microsoft.Extensions.Logging.Abstractions" />
+    <PackageReference Include="Microsoft.Extensions.Hosting.Abstractions" />
+  </ItemGroup>
+</Project>
+

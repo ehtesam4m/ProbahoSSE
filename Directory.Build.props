@@ -1,0 +1,45 @@
+<Project>
+  <PropertyGroup>
+    <TargetFramework>net10.0</TargetFramework>
+    <LangVersion>preview</LangVersion>
+    <Nullable>enable</Nullable>
+    <ImplicitUsings>enable</ImplicitUsings>
+    <TreatWarningsAsErrors>false</TreatWarningsAsErrors>
+    <GenerateDocumentationFile>true</GenerateDocumentationFile>
+    <IsAotCompatible>true</IsAotCompatible>
+
+    <!-- NuGet Metadata -->
+    <Authors>ProbahoSSE Contributors</Authors>
+    <Company>ProbahoSSE</Company>
+    <Product>ProbahoSSE</Product>
+    <Description>A high-performance .NET 10 Server-Sent Events (SSE) library with Redis backplane support.</Description>
+    <Copyright>Copyright © 2026 ProbahoSSE Contributors</Copyright>
+    <PackageLicenseExpression>MIT</PackageLicenseExpression>
+    <PackageProjectUrl>https://github.com/probahosse/ProbahoSSE</PackageProjectUrl>
+    <RepositoryUrl>https://github.com/probahosse/ProbahoSSE</RepositoryUrl>
+    <RepositoryType>git</RepositoryType>
+    <PackageTags>sse;server-sent-events;redis;realtime;dotnet;aspnetcore</PackageTags>
+    <PackageReadmeFile>README.md</PackageReadmeFile>
+
+    <!-- Version is driven entirely by Git tags via MinVer. Do NOT set Version here.
+         git tag v1.0.0  →  NuGet package version 1.0.0
+         Commits past tag →  1.0.1-alpha.0.{n} (automatic pre-release, not published)
+         No tag yet       →  0.0.0-alpha.0 -->
+    <MinVerDefaultPreReleaseIdentifiers>alpha.0</MinVerDefaultPreReleaseIdentifiers>
+    <MinVerTagPrefix>v</MinVerTagPrefix>
+  </PropertyGroup>
+
+  <!-- Test/sample projects don't need XML docs or AOT, and CS1591 (missing XML comment) is irrelevant -->
+  <PropertyGroup Condition="'$(IsPackable)' == 'false'">
+    <GenerateDocumentationFile>false</GenerateDocumentationFile>
+    <IsAotCompatible>false</IsAotCompatible>
+    <NoWarn>$(NoWarn);CS1591</NoWarn>
+  </PropertyGroup>
+
+  <!-- MinVer is a build-time-only analyzer — it sets $(Version) from the nearest Git tag.
+       Scoped to packable projects only; samples and internal shared libs are excluded. -->
+  <ItemGroup Condition="'$(IsPackable)' != 'false'">
+    <PackageReference Include="MinVer" PrivateAssets="All" />
+  </ItemGroup>
+</Project>
+
