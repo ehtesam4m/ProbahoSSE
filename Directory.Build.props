@@ -33,13 +33,15 @@
   <PropertyGroup Condition="'$(IsPackable)' == 'false'">
     <GenerateDocumentationFile>false</GenerateDocumentationFile>
     <IsAotCompatible>false</IsAotCompatible>
-    <NoWarn>$(NoWarn);CS1591</NoWarn>
+    <NoWarn>$(NoWarn);CS1591;NU5128</NoWarn>
   </PropertyGroup>
 
   <!-- MinVer is a build-time-only analyzer — it sets $(Version) from the nearest Git tag.
        Scoped to packable projects only; samples and internal shared libs are excluded. -->
   <ItemGroup Condition="'$(IsPackable)' != 'false'">
     <PackageReference Include="MinVer" PrivateAssets="All" />
+    <!-- Bundle the repo README into every NuGet package (required by PackageReadmeFile) -->
+    <None Include="$(MSBuildThisFileDirectory)README.md" Pack="true" PackagePath="\" />
   </ItemGroup>
 </Project>
 
