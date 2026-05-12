@@ -1,6 +1,6 @@
 name: Release
 
-# Triggered on every merge to main.
+# Triggered on every merge to main, or manually via workflow_dispatch.
 # Pipeline: build → tag (auto-bumps version) → publish (to NuGet.org)
 #
 # Bump control via merge commit message keywords:
@@ -8,10 +8,19 @@ name: Release
 #   [minor]     →  v1.0.0 → v1.1.0
 #   (default)   →  v1.0.0 → v1.0.1  (patch)
 #   [skip-tag]  →  no tag, no publish
+#
+# Manual publish (workflow_dispatch):
+#   Provide an existing tag (e.g. v0.1.0) to publish it without creating a new tag.
 on:
   push:
     branches:
       - main
+  workflow_dispatch:
+    inputs:
+      tag:
+        description: 'Existing git tag to publish (e.g. v0.1.0)'
+        required: true
+        type: string
 
 jobs:
   # ── Job 1: Build & validate ───────────────────────────────────────────────
@@ -154,10 +163,84 @@ jobs:
           ls -la ./artifacts/*.nupkg
 
       - name: Publish to NuGet.org
-        # No --api-key needed — NuGet Trusted Publishing authenticates via OIDC token.
-        # Configure Trusted Publisher on nuget.org for each package:
+        # NuGet Trusted Publishing: exchange GitHub OIDC token for a short-lived NuGet API token,
+        # then push. No stored API key required.
+        # Requires Trusted Publisher configured on nuget.org:
         #   Owner: ehtesam4m | Repo: ProbahoSSE | Workflow: publish.yml
-        run: >
-          dotnet nuget push ./artifacts/*.nupkg
-          --source https://api.nuget.org/v3/index.json
-          --skip-duplicate
+        env:
+          NUGET_TRUSTED_PUBLISHING_TOKEN_URL: https://www.nuget.org/api/v1/authorize/token-exchange
+        run: |
+          # 1. Get the GitHub OIDC JWT
+          OIDC_TOKEN=$(curl -s -H "Authorization: bearer $ACTIONS_ID_TOKEN_REQUEST_TOKEN" \
+            "$ACTIONS_ID_TOKEN_REQUEST_URL&audience=nuget.org" | jq -r '.value')
+
+          # 2. Exchange it for a short-lived NuGet API token
+          NUGET_TOKEN=$(curl -s -X POST "$NUGET_TRUSTED_PUBLISHING_TOKEN_URL" \
+            -H "Content-Type: application/json" \
+            -d "{\"oidcToken\": \"$OIDC_TOKEN\"}" | jq -r '.token')
+
+          # 3. Push all packages using the obtained token
+          dotnet nuget push ./artifacts/*.nupkg \
+            --api-key "$NUGET_TOKEN" \
+            --source https://api.nuget.org/v3/index.json \
+            --skip-duplicate
+
+  # ── Job 4: Manual publish to NuGet.org (workflow_dispatch) ───────────────
+  manual-publish:
+    name: Manual Publish to NuGet.org
+    runs-on: ubuntu-latest
+    if: ${{ github.event_name == 'workflow_dispatch' }}
+    permissions:
+      id-token: write  # Required for NuGet Trusted Publishing (OIDC)
+
+    steps:
+      - name: Checkout repository
+        uses: actions/checkout@v4
+        with:
+          fetch-depth: 0
+          # Check out the exact tagged commit so MinVer resolves the release version.
+          ref: ${{ github.event.inputs.tag }}
+
+      - name: Setup .NET 10
+        uses: actions/setup-dotnet@v4
+        with:
+          dotnet-version: '10.0.x'
+
+      - name: Restore dependencies
+        run: dotnet restore ProbahoSSE.sln
+
+      - name: Build solution
+        run: dotnet build ProbahoSSE.sln --configuration Release --no-restore
+
+      - name: Pack NuGet packages
+        # MinVer reads the tag on HEAD (e.g. v1.2.3) → Version=1.2.3 on all packable projects.
+        run: dotnet pack ProbahoSSE.sln --configuration Release --no-build --output ./artifacts
+
+      - name: List packages
+        run: |
+          echo "Tag     : ${{ github.event.inputs.tag }}"
+          echo "Packages:"
+          ls -la ./artifacts/*.nupkg
+
+      - name: Publish to NuGet.org
+        # NuGet Trusted Publishing: exchange GitHub OIDC token for a short-lived NuGet API token,
+        # then push. No stored API key required.
+        # Requires Trusted Publisher configured on nuget.org:
+        #   Owner: ehtesam4m | Repo: ProbahoSSE | Workflow: publish.yml
+        env:
+          NUGET_TRUSTED_PUBLISHING_TOKEN_URL: https://www.nuget.org/api/v1/authorize/token-exchange
+        run: |
+          # 1. Get the GitHub OIDC JWT
+          OIDC_TOKEN=$(curl -s -H "Authorization: bearer $ACTIONS_ID_TOKEN_REQUEST_TOKEN" \
+            "$ACTIONS_ID_TOKEN_REQUEST_URL&audience=nuget.org" | jq -r '.value')
+
+          # 2. Exchange it for a short-lived NuGet API token
+          NUGET_TOKEN=$(curl -s -X POST "$NUGET_TRUSTED_PUBLISHING_TOKEN_URL" \
+            -H "Content-Type: application/json" \
+            -d "{\"oidcToken\": \"$OIDC_TOKEN\"}" | jq -r '.token')
+
+          # 3. Push all packages using the obtained token
+          dotnet nuget push ./artifacts/*.nupkg \
+            --api-key "$NUGET_TOKEN" \
+            --source https://api.nuget.org/v3/index.json \
+            --skip-duplicate
