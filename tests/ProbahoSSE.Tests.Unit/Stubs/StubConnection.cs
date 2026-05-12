@@ -21,11 +21,11 @@ internal sealed class StubConnection : IProbahoSseConnection
         ConnectionId = connectionId ?? Guid.NewGuid().ToString("N");
     }
 
-    public ValueTask SendAsync(IProbahoSseEvent sseEvent, CancellationToken cancellationToken = default)
+    public async ValueTask SendAsync(IProbahoSseEvent sseEvent, CancellationToken cancellationToken = default)
     {
+        await Task.Yield(); // ensure async — lets Task.WhenAll start all tasks before any throws
         if (SendShouldThrow) throw new InvalidOperationException("Send failed");
         Received.Add(sseEvent);
-        return ValueTask.CompletedTask;
     }
 
     public void Disconnect() => IsConnected = false;
