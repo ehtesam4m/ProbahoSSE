@@ -1,0 +1,386 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+  <title>ProbahoSSE Demo</title>
+  <style>
+    * { box-sizing: border-box; margin: 0; padding: 0; }
+    body { font-family: 'Segoe UI', system-ui, sans-serif; background: #0f172a; color: #e2e8f0; min-height: 100vh; }
+
+    header { padding: 1.25rem 2rem; display: flex; align-items: center; gap: 1rem; flex-wrap: wrap; }
+    header h1 { font-size: 1.4rem; font-weight: 700; }
+    .badge { border-radius: 999px; padding: 0.2rem 0.8rem; font-size: 0.72rem; font-weight: 700; letter-spacing: 0.05em; text-transform: uppercase; }
+    .badge-pubsub { background: #7c3aed; border: 1px solid #a78bfa; color: #ede9fe; }
+    .badge-stream { background: #0369a1; border: 1px solid #38bdf8; color: #e0f2fe; }
+    .mode-note { font-size: 0.78rem; color: #94a3b8; margin-top: 0.25rem; }
+
+    .container { max-width: 1100px; margin: 0 auto; padding: 0 1.5rem 2rem; }
+
+    .info-box { border-radius: 10px; padding: 0.85rem 1.25rem; margin-bottom: 1.25rem; font-size: 0.83rem; line-height: 1.6; }
+    .info-pubsub { background: #1e1433; border: 1px solid #6d28d9; color: #c4b5fd; }
+    .info-stream  { background: #0c2340; border: 1px solid #0ea5e9; color: #7dd3fc; }
+    .info-box strong { display: block; margin-bottom: 0.3rem; font-size: 0.88rem; }
+
+    .controls { display: flex; gap: 0.75rem; align-items: center; flex-wrap: wrap; margin-bottom: 1.25rem; }
+    .controls input { flex: 1; min-width: 160px; padding: 0.5rem 0.75rem; border-radius: 8px; border: 1px solid #334155; background: #1e293b; color: #e2e8f0; font-size: 0.88rem; }
+    .controls button { padding: 0.5rem 1.1rem; border-radius: 8px; border: none; cursor: pointer; font-weight: 600; font-size: 0.85rem; transition: opacity 0.2s; }
+    #btnConnect    { background: #22c55e; color: #fff; }
+    #btnDisconnect { background: #ef4444; color: #fff; }
+    #btnClear      { background: #475569; color: #fff; }
+    .controls button:hover { opacity: 0.85; }
+
+    .user-chips { display: flex; align-items: center; gap: 0.5rem; flex-wrap: wrap; margin-bottom: 1.25rem; }
+    .chip-label { font-size: 0.75rem; color: #64748b; }
+    .chip { padding: 0.3rem 0.85rem; border-radius: 999px; border: 1px solid #334155; background: #1e293b; color: #e2e8f0; font-size: 0.8rem; cursor: pointer; transition: background 0.15s, border-color 0.15s; }
+    .chip:hover { background: #334155; border-color: #64748b; }
+    .chip.active { background: #fde68a22; border-color: #fde68a; color: #fde68a; }
+
+    .status-bar { display: flex; gap: 1rem; margin-bottom: 1.25rem; flex-wrap: wrap; }
+    .stat { background: #1e293b; border: 1px solid #334155; border-radius: 10px; padding: 0.65rem 1rem; min-width: 130px; }
+    .stat .label { font-size: 0.68rem; text-transform: uppercase; letter-spacing: 0.07em; color: #64748b; margin-bottom: 0.2rem; }
+    .stat .value { font-size: 1.2rem; font-weight: 700; word-break: break-all; }
+    #statusDot { width: 9px; height: 9px; border-radius: 50%; background: #64748b; display: inline-block; margin-right: 5px; transition: background 0.3s; }
+    #statusDot.connected { background: #22c55e; box-shadow: 0 0 7px #22c55e88; }
+    #statusDot.error     { background: #ef4444; }
+
+    /* ── Sensor gauges ─────────────────────────────────────────────────────── */
+    .gauge-panel { display: none; gap: 0.75rem; flex-wrap: wrap; margin-bottom: 1.25rem; }
+    .gauge-panel.visible { display: flex; }
+    .gauge { background: #1e293b; border: 1px solid #334155; border-radius: 12px; padding: 0.9rem 1.2rem; min-width: 140px; flex: 1; transition: border-color 0.3s; }
+    .gauge.alert-active { border-color: #f59e0b; background: #1c1506; }
+    .gauge .g-sensor { font-size: 0.68rem; text-transform: uppercase; letter-spacing: 0.08em; color: #64748b; margin-bottom: 0.3rem; }
+    .gauge .g-value { font-size: 2rem; font-weight: 800; line-height: 1; }
+    .gauge .g-unit  { font-size: 0.78rem; color: #94a3b8; margin-top: 0.15rem; }
+    .gauge .g-alert { display: inline-block; margin-top: 0.5rem; background: #f59e0b22; border: 1px solid #f59e0b; color: #fde68a; border-radius: 4px; padding: 0.1rem 0.45rem; font-size: 0.68rem; font-weight: 700; }
+
+    .replay-note { display: none; background: #1a2e1a; border: 1px solid #22c55e55; border-radius: 8px; padding: 0.6rem 1rem; font-size: 0.78rem; color: #86efac; margin-bottom: 1rem; }
+
+    .feed { background: #0c1525; border: 1px solid #334155; border-radius: 12px; height: 420px; overflow-y: auto; padding: 0.75rem; display: flex; flex-direction: column; gap: 0.4rem; }
+
+    /* ── Sensor event card ─────────────────────────────────────────────────── */
+    .event-card { border-radius: 7px; padding: 0.65rem 0.9rem; background: #1e293b; animation: slideIn 0.2s ease; }
+    .event-card.reading { border-left: 4px solid #22c55e; }
+    .event-card.alert   { border-left: 4px solid #f59e0b; background: #1c1506; }
+    .event-card.replay  { border-left: 4px solid #a78bfa; background: #1e1433; }
+    .event-card.message { border-left: 4px solid #0ea5e9; }
+    .event-card.update  { border-left: 4px solid #22c55e; }
+
+    .event-meta { display: flex; gap: 0.5rem; font-size: 0.7rem; color: #64748b; margin-bottom: 0.4rem; flex-wrap: wrap; align-items: center; }
+    .event-meta span { background: #0f172a; padding: 0.1rem 0.35rem; border-radius: 3px; }
+    .event-meta .group-tag { color: #fde68a; }
+    .event-meta .sensor-tag { color: #38bdf8; }
+    .alert-badge { background: #f59e0b22 !important; border: 1px solid #f59e0b; color: #fde68a !important; font-weight: 700; }
+
+    /* Sensor reading row */
+    .sensor-row { display: flex; align-items: baseline; gap: 0.5rem; }
+    .sensor-val { font-size: 1.5rem; font-weight: 800; color: #e2e8f0; }
+    .sensor-unit { font-size: 0.85rem; color: #94a3b8; }
+    .sensor-ts { font-size: 0.68rem; color: #475569; margin-top: 0.25rem; }
+
+    /* Raw data fallback */
+    .event-data { font-size: 0.82rem; color: #cbd5e1; white-space: pre-wrap; word-break: break-all; }
+
+    @keyframes slideIn { from { opacity: 0; transform: translateY(-5px); } to { opacity: 1; transform: translateY(0); } }
+    .feed::-webkit-scrollbar { width: 5px; }
+    .feed::-webkit-scrollbar-track { background: transparent; }
+    .feed::-webkit-scrollbar-thumb { background: #334155; border-radius: 3px; }
+  </style>
+</head>
+<body>
+
+<header id="header">
+  <div>
+    <div style="font-size:0.72rem;color:#94a3b8;margin-bottom:0.2rem;">ProbahoSSE — প্রবাহ</div>
+    <h1 id="title">ProbahoSSE Demo</h1>
+    <div class="mode-note" id="modeNote">Detecting backplane…</div>
+  </div>
+  <span class="badge badge-pubsub" id="badge">Loading</span>
+</header>
+
+<div class="container">
+  <div class="info-box info-pubsub" id="infoBox">Fetching backplane info…</div>
+
+  <div class="controls">
+    <input id="groupInput" type="text" placeholder="Enter group / user name →" value="" />
+    <button id="btnConnect"    onclick="connect()">Connect</button>
+    <button id="btnDisconnect" onclick="disconnect()">Disconnect</button>
+    <button id="btnClear"      onclick="clearFeed()">Clear</button>
+  </div>
+  <div class="user-chips">
+    <span class="chip-label">Group:</span>
+    <button class="chip" onclick="pickGroup('alice')">alice</button>
+    <button class="chip" onclick="pickGroup('bob')">bob</button>
+    <button class="chip" onclick="pickGroup('charlie')">charlie</button>
+    <button class="chip" onclick="pickGroup('diana')">diana</button>
+  </div>
+
+  <div class="status-bar">
+    <div class="stat">
+      <div class="label"><span id="statusDot"></span>Status</div>
+      <div class="value" id="statusText">Disconnected</div>
+    </div>
+    <div class="stat">
+      <div class="label">Events Received</div>
+      <div class="value" id="eventCount">0</div>
+    </div>
+    <div class="stat">
+      <div class="label">Last Event ID</div>
+      <div class="value" id="lastId" style="font-size:0.65rem;">—</div>
+    </div>
+    <div class="stat">
+      <div class="label">Group</div>
+      <div class="value" id="connectedGroup" style="font-size:0.9rem;color:#fde68a;">—</div>
+    </div>
+    <div class="stat">
+      <div class="label">Backplane</div>
+      <div class="value" id="backplaneLabel" style="font-size:0.8rem;">—</div>
+    </div>
+  </div>
+
+  <!-- Live sensor gauge (shown when a sensor reading arrives) -->
+  <div class="gauge-panel" id="gaugePanel">
+    <!-- gauges are created dynamically -->
+  </div>
+
+  <div class="replay-note" id="replayNote"></div>
+  <div class="feed" id="feed"></div>
+</div>
+
+<script>
+  // ── State ─────────────────────────────────────────────────────────────────
+  let isPubSub = true;
+  let evtSource = null;
+  let count = 0;
+  let isReplaying = false;
+  const gauges = {};   // sensor → { el, valEl, unitEl, alertEl }
+
+  // ── Backplane info ────────────────────────────────────────────────────────
+  async function loadInfo() {
+    for (let attempt = 1; attempt <= 10; attempt++) {
+      try {
+        const res = await fetch('/info');
+        if (!res.ok) throw new Error(`HTTP ${res.status}`);
+        const info = await res.json();
+        isPubSub = !info.supportsReplay;
+        applyMode(info);
+        return;
+      } catch {
+        const msg = attempt < 10
+          ? `Detecting backplane… (attempt ${attempt}/10)`
+          : 'Could not reach /info — is the API running?';
+        document.getElementById('modeNote').textContent = msg;
+        if (attempt < 10) await new Promise(r => setTimeout(r, 2000));
+      }
+    }
+  }
+
+  function applyMode(info) {
+    const isStream = info.supportsReplay;
+    document.getElementById('title').textContent = `ProbahoSSE — ${info.displayName} Demo`;
+
+    const badge = document.getElementById('badge');
+    badge.textContent = isStream ? 'Persistent + Replay' : 'Fire & Forget';
+    badge.className = `badge ${isStream ? 'badge-stream' : 'badge-pubsub'}`;
+    document.getElementById('modeNote').textContent = info.description;
+
+    const backplaneLabel = document.getElementById('backplaneLabel');
+    backplaneLabel.textContent = info.displayName;
+    backplaneLabel.style.color = isStream ? '#38bdf8' : '#a78bfa';
+
+    const infoBox = document.getElementById('infoBox');
+    infoBox.className = `info-box ${isStream ? 'info-stream' : 'info-pubsub'}`;
+    infoBox.innerHTML = isStream
+      ? `<strong>🔵 Redis Stream — Persistent + Replay</strong>
+         The browser's <code>EventSource</code> sends <code>Last-Event-ID</code> on every reconnect and the
+         <strong>Stream backplane replays every missed event</strong> since that ID before resuming live delivery.
+         Disconnect for a few seconds: on reconnect you will receive all missed sensor readings, in order,
+         highlighted in purple below.`
+      : `<strong>🔴 Redis Pub/Sub — Fire &amp; Forget</strong>
+         The browser's <code>EventSource</code> automatically sends <code>Last-Event-ID</code> on every reconnect,
+         but the <strong>Pub/Sub backplane has no memory</strong> — it only delivers to currently subscribed connections.
+         Disconnect for a few seconds and you will see a gap in event IDs, proving missed readings are permanently lost. However you can use your own persistent storage/queue to replay events from last event Id`;
+
+    if (info.instance) {
+      document.getElementById('modeNote').textContent += ` (instance: ${info.instance})`;
+    }
+  }
+
+  // ── EventSource ───────────────────────────────────────────────────────────
+  function connect() {
+    if (evtSource) evtSource.close();
+    const group = document.getElementById('groupInput').value.trim() || 'alice';
+    document.getElementById('connectedGroup').textContent = group;
+
+    setStatus('connecting', 'Connecting…');
+    evtSource = new EventSource(`/sse?group=${encodeURIComponent(group)}`);
+
+    evtSource.onopen = () => {
+      setStatus('connected', 'Connected');
+      isReplaying = true;
+      setTimeout(() => { isReplaying = false; }, 2000);
+    };
+
+    // Named event types emitted by the IoT ingest endpoint
+    evtSource.addEventListener('connected', e => handleConnected(e));
+    evtSource.addEventListener('reading', e => handleEvent(e, isReplaying));
+    evtSource.addEventListener('alert',   e => handleEvent(e, isReplaying));
+    // Generic fallbacks
+    evtSource.addEventListener('message', e => handleEvent(e, isReplaying));
+    evtSource.addEventListener('update',  e => handleEvent(e, isReplaying));
+
+    evtSource.onerror = () => setStatus('error', 'Reconnecting…');
+  }
+
+  function disconnect() {
+    if (evtSource) { evtSource.close(); evtSource = null; }
+    setStatus('', 'Disconnected');
+    document.getElementById('connectedGroup').textContent = '—';
+  }
+
+  function clearFeed() {
+    document.getElementById('feed').innerHTML = '';
+    count = 0;
+    document.getElementById('eventCount').textContent = '0';
+  }
+
+  // ── Connected event ───────────────────────────────────────────────────────
+  function handleConnected(e) {
+    const feed = document.getElementById('feed');
+    const card = document.createElement('div');
+    card.className = 'event-card';
+    card.style.cssText = 'border-left: 4px solid #22c55e; background: #0d2010;';
+    card.innerHTML = `
+      <div class="event-meta">
+        <span>type: <strong>connected</strong></span>
+        <span style="color:#22c55e">✓ SSE stream established</span>
+        <span>${new Date().toLocaleTimeString()}</span>
+      </div>`;
+    feed.prepend(card);
+  }
+
+  // ── Event rendering ───────────────────────────────────────────────────────
+  function handleEvent(e, replay) {
+    count++;
+    const eventId = e.lastEventId || '';
+    document.getElementById('eventCount').textContent = count;
+    if (eventId) document.getElementById('lastId').textContent = eventId;
+
+    let parsed = null;
+    try { parsed = JSON.parse(e.data); } catch {}
+
+    const isReplay = !isPubSub && replay;
+    if (isReplay) {
+      const rn = document.getElementById('replayNote');
+      rn.style.display = 'block';
+      rn.textContent = '♻️ Replaying missed events from Last-Event-ID — these were delivered while you were disconnected.';
+    }
+
+    // Update live gauge if this looks like a sensor reading
+    if (parsed && parsed.sensor != null && parsed.value != null) {
+      updateGauge(parsed);
+    }
+
+    const feed = document.getElementById('feed');
+    const card = document.createElement('div');
+
+    let typeClass;
+    if (isReplay) typeClass = 'replay';
+    else if (parsed?.alert) typeClass = 'alert';
+    else if (e.type === 'reading') typeClass = 'reading';
+    else typeClass = e.type !== 'message' ? e.type : 'message';
+
+    card.className = `event-card ${typeClass}`;
+    card.innerHTML = buildCardHtml(e, parsed, eventId, isReplay);
+
+    feed.prepend(card);
+    while (feed.children.length > 300) feed.removeChild(feed.lastChild);
+  }
+
+  function buildCardHtml(e, parsed, eventId, isReplay) {
+    const group   = parsed?.group  ?? '—';
+    const sensor  = parsed?.sensor ?? null;
+    const value   = parsed?.value  ?? null;
+    const unit    = parsed?.unit   ?? '';
+    const isAlert = parsed?.alert  ?? false;
+    const ts      = parsed?.timestamp ? new Date(parsed.timestamp).toLocaleTimeString() : new Date().toLocaleTimeString();
+
+    const metaParts = [
+      `<span>type: <strong>${e.type}</strong></span>`,
+      eventId ? `<span>id: ${escapeHtml(eventId)}</span>` : '',
+      `<span class="group-tag">group: ${escapeHtml(group)}</span>`,
+      sensor ? `<span class="sensor-tag">${escapeHtml(sensor)}</span>` : '',
+      isAlert ? `<span class="alert-badge">⚠ ALERT</span>` : '',
+      isReplay ? '<span style="color:#a78bfa">♻ replay</span>' : '',
+      `<span>${ts}</span>`,
+    ].filter(Boolean).join('');
+
+    if (sensor !== null && value !== null) {
+      // Rich sensor card
+      return `
+        <div class="event-meta">${metaParts}</div>
+        <div class="sensor-row">
+          <span class="sensor-val">${escapeHtml(String(value))}</span>
+          <span class="sensor-unit">${escapeHtml(unit)}</span>
+        </div>`;
+    }
+
+    // Generic fallback — pretty-print JSON or raw string
+    const dataDisplay = parsed ? JSON.stringify(parsed, null, 2) : e.data;
+    return `
+      <div class="event-meta">${metaParts}</div>
+      <div class="event-data">${escapeHtml(dataDisplay)}</div>`;
+  }
+
+  // ── Live gauge panel ──────────────────────────────────────────────────────
+  function updateGauge(parsed) {
+    const { sensor, value, unit, alert: isAlert } = parsed;
+    const panel = document.getElementById('gaugePanel');
+
+    if (!gauges[sensor]) {
+      const el = document.createElement('div');
+      el.className = 'gauge';
+      el.innerHTML = `
+        <div class="g-sensor">${escapeHtml(sensor)}</div>
+        <div class="g-value">—</div>
+        <div class="g-unit">${escapeHtml(unit)}</div>
+        <div class="g-alert" style="display:none">⚠ ALERT</div>`;
+      panel.appendChild(el);
+      panel.classList.add('visible');
+      gauges[sensor] = {
+        el,
+        valEl:   el.querySelector('.g-value'),
+        unitEl:  el.querySelector('.g-unit'),
+        alertEl: el.querySelector('.g-alert'),
+      };
+    }
+
+    const g = gauges[sensor];
+    g.valEl.textContent  = value;
+    g.unitEl.textContent = unit;
+    g.alertEl.style.display = isAlert ? 'inline-block' : 'none';
+    g.el.classList.toggle('alert-active', isAlert);
+  }
+
+  // ── Helpers ───────────────────────────────────────────────────────────────
+  function setStatus(state, text) {
+    document.getElementById('statusDot').className = state;
+    document.getElementById('statusText').textContent = text;
+    if (state === 'connected') document.getElementById('replayNote').style.display = 'none';
+  }
+
+  function escapeHtml(s) {
+    return String(s).replace(/&/g,'&amp;').replace(/</g,'&lt;').replace(/>/g,'&gt;');
+  }
+
+  function pickGroup(name) {
+    document.getElementById('groupInput').value = name;
+    document.querySelectorAll('.chip').forEach(c => c.classList.toggle('active', c.textContent.trim() === name));
+  }
+
+  // ── Boot ──────────────────────────────────────────────────────────────────
+  loadInfo();
+</script>
+</body>
+</html>
+

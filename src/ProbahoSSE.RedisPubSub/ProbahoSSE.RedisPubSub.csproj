@@ -1,0 +1,18 @@
+<Project Sdk="Microsoft.NET.Sdk">
+  <PropertyGroup>
+    <IsPackable>true</IsPackable>
+    <PackageId>ProbahoSSE.RedisPubSub</PackageId>
+    <Description>Redis Pub/Sub backplane for ProbahoSSE — enables low-latency, fire-and-forget broadcasting across multiple server instances.</Description>
+  </PropertyGroup>
+  <ItemGroup>
+    <ProjectReference Include="..\ProbahoSSE\ProbahoSSE.csproj" />
+    <ProjectReference Include="..\ProbahoSSE.Backplane.Redis\ProbahoSSE.Backplane.Redis.csproj" />
+  </ItemGroup>
+  <ItemGroup>
+    <PackageReference Include="StackExchange.Redis" />
+    <PackageReference Include="Microsoft.Extensions.DependencyInjection.Abstractions" />
+    <PackageReference Include="Microsoft.Extensions.Options" />
+    <PackageReference Include="Microsoft.Extensions.Logging.Abstractions" />
+  </ItemGroup>
+</Project>
+

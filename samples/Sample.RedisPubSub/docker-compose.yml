@@ -1,0 +1,70 @@
+name: probaho-pubsub
+
+services:
+  # ── Infrastructure ──────────────────────────────────────────────────────────
+  redis:
+    image: redis:7.2-alpine
+    command: redis-server --maxmemory 256mb --maxmemory-policy allkeys-lru
+    healthcheck:
+      test: ["CMD", "redis-cli", "ping"]
+      interval: 5s
+      timeout: 3s
+      retries: 5
+
+  # ── IoT Sensor Simulator ─────────────────────────────────────────────────────
+  simulator:
+    build:
+      context: ../..
+      dockerfile: samples/Common.IoTSensorSimulator/Dockerfile
+    depends_on:
+      - pubsub-api-1
+    environment:
+      Simulator__IngestUrl: http://api-1:8080/ingest
+    restart: unless-stopped
+
+  # ── API Instance 1 ──────────────────────────────────────────────────────────
+  pubsub-api-1:
+    build:
+      context: ../..
+      dockerfile: samples/Sample.RedisPubSub/Dockerfile
+    depends_on:
+      redis:
+        condition: service_healthy
+    environment:
+      Redis__ConnectionString: redis:6379
+      ASPNETCORE_URLS: http://+:8080
+    networks:
+      default:
+        aliases:
+          - api-1
+    restart: unless-stopped
+
+  # ── API Instance 2 ──────────────────────────────────────────────────────────
+  pubsub-api-2:
+    build:
+      context: ../..
+      dockerfile: samples/Sample.RedisPubSub/Dockerfile
+    depends_on:
+      redis:
+        condition: service_healthy
+    environment:
+      Redis__ConnectionString: redis:6379
+      ASPNETCORE_URLS: http://+:8080
+    networks:
+      default:
+        aliases:
+          - api-2
+    restart: unless-stopped
+
+  # ── Nginx Reverse Proxy + HTML ───────────────────────────────────────────────
+  nginx:
+    image: nginx:1.27-alpine
+    ports:
+      - "8080:8080"
+    volumes:
+      - ../nginx/nginx.conf:/etc/nginx/nginx.conf:ro
+      - ../nginx/html:/usr/share/nginx/html:ro
+    depends_on:
+      - pubsub-api-1
+      - pubsub-api-2
+    restart: unless-stopped

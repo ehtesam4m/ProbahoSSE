@@ -1,0 +1,164 @@
+name: Release
+
+# Triggered on every merge to main.
+# Pipeline: build → tag (auto-bumps version) → publish (to NuGet.org)
+#
+# Bump control via merge commit message keywords:
+#   [major]     →  v1.0.0 → v2.0.0
+#   [minor]     →  v1.0.0 → v1.1.0
+#   (default)   →  v1.0.0 → v1.0.1  (patch)
+#   [skip-tag]  →  no tag, no publish
+on:
+  push:
+    branches:
+      - main
+
+jobs:
+  # ── Job 1: Build & validate ───────────────────────────────────────────────
+  build:
+    name: Build and Validate
+    runs-on: ubuntu-latest
+    if: |
+      !contains(github.event.head_commit.message, '[skip-tag]') &&
+      !contains(github.event.head_commit.message, '[skip ci]')
+
+    steps:
+      - name: Checkout repository
+        uses: actions/checkout@v4
+        with:
+          fetch-depth: 0
+
+      - name: Setup .NET 10
+        uses: actions/setup-dotnet@v4
+        with:
+          dotnet-version: '10.0.x'
+
+      - name: Restore dependencies
+        run: dotnet restore ProbahoSSE.sln
+
+      - name: Build solution
+        run: dotnet build ProbahoSSE.sln --configuration Release --no-restore
+
+      - name: Run unit tests
+        run: >
+          dotnet test tests/ProbahoSSE.Tests.Unit/ProbahoSSE.Tests.Unit.csproj
+          --configuration Release --no-build --verbosity normal
+
+      - name: Run integration tests
+        env:
+          DOTNET_ENVIRONMENT: Development
+          TESTCONTAINERS_RYUK_DISABLED: "true"
+        run: >
+          dotnet test tests/ProbahoSSE.Tests.Integration/ProbahoSSE.Tests.Integration.csproj
+          --configuration Release --no-build --verbosity normal
+
+      - name: Validate packages build cleanly
+        # Dry-run pack — confirms all three NuGet projects pack without errors.
+        # Excludes ProbahoSSE.Backplane.Redis (IsPackable=false) and samples.
+        run: dotnet pack ProbahoSSE.sln --configuration Release --no-build --output ./artifacts
+
+  # ── Job 2: Auto-bump version and push Git tag ─────────────────────────────
+  tag:
+    name: Bump version and tag
+    runs-on: ubuntu-latest
+    needs: build
+    permissions:
+      contents: write   # required to push the new tag
+
+    outputs:
+      new_tag: ${{ steps.next.outputs.tag }}
+
+    steps:
+      - name: Checkout repository
+        uses: actions/checkout@v4
+        with:
+          fetch-depth: 0
+
+      - name: Determine bump type from commit message
+        id: bump
+        run: |
+          MSG="${{ github.event.head_commit.message }}"
+          if echo "$MSG" | grep -qi '\[major\]'; then
+            echo "type=major" >> "$GITHUB_OUTPUT"
+          elif echo "$MSG" | grep -qi '\[minor\]'; then
+            echo "type=minor" >> "$GITHUB_OUTPUT"
+          else
+            echo "type=patch" >> "$GITHUB_OUTPUT"
+          fi
+
+      - name: Compute next version
+        id: next
+        run: |
+          LATEST=$(git tag --list 'v*' --sort=-version:refname | head -n1)
+          LATEST=${LATEST:-v0.0.0}
+          echo "Latest tag: $LATEST"
+
+          VERSION="${LATEST#v}"
+          MAJOR=$(echo "$VERSION" | cut -d. -f1)
+          MINOR=$(echo "$VERSION" | cut -d. -f2)
+          PATCH=$(echo "$VERSION" | cut -d. -f3)
+
+          BUMP_TYPE="${{ steps.bump.outputs.type }}"
+          if   [ "$BUMP_TYPE" = "major" ]; then MAJOR=$((MAJOR+1)); MINOR=0; PATCH=0
+          elif [ "$BUMP_TYPE" = "minor" ]; then MINOR=$((MINOR+1)); PATCH=0
+          else PATCH=$((PATCH+1))
+          fi
+
+          NEXT_TAG="v${MAJOR}.${MINOR}.${PATCH}"
+          echo "Next tag: $NEXT_TAG (bump: $BUMP_TYPE)"
+          echo "tag=$NEXT_TAG" >> "$GITHUB_OUTPUT"
+
+      - name: Create and push tag
+        run: |
+          git config user.name  "github-actions[bot]"
+          git config user.email "github-actions[bot]@users.noreply.github.com"
+          git tag "${{ steps.next.outputs.tag }}" -m "Release ${{ steps.next.outputs.tag }}"
+          git push origin "${{ steps.next.outputs.tag }}"
+
+  # ── Job 3: Pack and publish to NuGet.org ─────────────────────────────────
+  publish:
+    name: Pack and Publish NuGet Packages
+    runs-on: ubuntu-latest
+    needs: tag
+    if: false  # Disabled — re-enable when ready to publish to NuGet.org
+
+    # Optional manual approval gate.
+    # Create a "nuget-production" environment in repo Settings → Environments
+    # and add required reviewers to hold for approval before NuGet push.
+    environment: nuget-production
+
+    steps:
+      - name: Checkout repository
+        uses: actions/checkout@v4
+        with:
+          fetch-depth: 0
+          # Check out the exact tagged commit so MinVer resolves the release version.
+          ref: ${{ needs.tag.outputs.new_tag }}
+
+      - name: Setup .NET 10
+        uses: actions/setup-dotnet@v4
+        with:
+          dotnet-version: '10.0.x'
+
+      - name: Restore dependencies
+        run: dotnet restore ProbahoSSE.sln
+
+      - name: Build solution
+        run: dotnet build ProbahoSSE.sln --configuration Release --no-restore
+
+      - name: Pack NuGet packages
+        # MinVer reads the tag on HEAD (e.g. v1.2.3) → Version=1.2.3 on all packable projects.
+        run: dotnet pack ProbahoSSE.sln --configuration Release --no-build --output ./artifacts
+
+      - name: List packages
+        run: |
+          echo "Tag     : ${{ needs.tag.outputs.new_tag }}"
+          echo "Packages:"
+          ls -la ./artifacts/*.nupkg
+
+      - name: Publish to NuGet.org
+        run: >
+          dotnet nuget push ./artifacts/*.nupkg
+          --api-key ${{ secrets.NUGET_API_KEY }}
+          --source https://api.nuget.org/v3/index.json
+          --skip-duplicate
