@@ -120,12 +120,14 @@ jobs:
     name: Pack and Publish NuGet Packages
     runs-on: ubuntu-latest
     needs: tag
-    if: false  # Disabled — re-enable when ready to publish to NuGet.org
 
-    # Optional manual approval gate.
-    # Create a "nuget-production" environment in repo Settings → Environments
-    # and add required reviewers to hold for approval before NuGet push.
+    # Manual approval gate.
+    # Ensure a "nuget-production" environment exists in repo Settings → Environments.
+    # Add required reviewers there to gate the NuGet push.
     environment: nuget-production
+
+    permissions:
+      id-token: write  # Required for NuGet Trusted Publishing (OIDC)
 
     steps:
       - name: Checkout repository
@@ -157,8 +159,10 @@ jobs:
           ls -la ./artifacts/*.nupkg
 
       - name: Publish to NuGet.org
+        # No --api-key needed — NuGet Trusted Publishing authenticates via OIDC token.
+        # Configure Trusted Publisher on nuget.org for each package:
+        #   Owner: ehtesam4m | Repo: ProbahoSSE | Workflow: publish.yml | Env: nuget-production
         run: >
           dotnet nuget push ./artifacts/*.nupkg
-          --api-key ${{ secrets.NUGET_API_KEY }}
           --source https://api.nuget.org/v3/index.json
           --skip-duplicate
