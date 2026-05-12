@@ -54,7 +54,7 @@ jobs:
 
   # ── Job 2: Integration Tests (requires Docker for Testcontainers) ─────────
   integration-tests:
-    name: Integration Tests (Redis via Testcontainers)
+    name: Integration Tests (via Testcontainers)
     runs-on: ubuntu-latest
     # Docker is available on ubuntu-latest — Testcontainers will use it automatically.
 
