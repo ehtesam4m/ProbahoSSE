@@ -152,15 +152,29 @@ app.UseProbahoSse();
 // Return null or empty string to skip group assignment.
 app.MapProbahoSse("/sse", ctx => ctx.Request.Query["group"].FirstOrDefault());
 
-//OR
-//You can use your own endpoint mapper
-app.MapGet(
-            "/users/{userId}/sse",
-            (
-                //userId can be your group
-                string userId,
-                HttpContext ctx
-                ) => SseEndpointHandler.HandleAsync(ctx, userId))
+// OR — use your own minimal API endpoint mapper (e.g. group from route. UserId can be your group)
+app.MapGet("/users/{userId}/sse", (string userId, HttpContext ctx) =>
+    SseEndpointHandler.HandleAsync(ctx, userId));
+
+// OR — use from an MVC controller action
+// SseEndpointHandler.HandleAsync takes the current HttpContext so it works anywhere:
+
+[ApiController]
+[Route("api/[controller]")]
+public class EventsController : ControllerBase
+{
+    // Group from route segment
+    [HttpGet("{group}/stream")]
+    public Task Stream(string group) =>
+         SseEndpointHandler.HandleAsync(HttpContext, group);
+
+    // Group from authenticated user identity
+     [HttpGet("stream")]
+     [Authorize]
+     public Task Stream() =>
+         SseEndpointHandler.HandleAsync(HttpContext,
+             User.FindFirstValue(ClaimTypes.NameIdentifier));
+ }
 ```
 
 
