@@ -1,7 +1,7 @@
 using Microsoft.Extensions.Hosting;
 using Microsoft.Extensions.Logging;
 using ProbahoSSE.Abstractions;
-using ProbahoSSE.Backplane.Redis;
+using ProbahoSSE.Backplane;
 using ProbahoSSE.Models;
 using StackExchange.Redis;
 
@@ -48,7 +48,7 @@ public sealed class RedisPubSubListenerService : BackgroundService
             {
                 if (msg.Message.IsNullOrEmpty) continue;
 
-                var sseEvent = RedisEventSerializer.Deserialize(msg.Message!);
+                var sseEvent = SseEventSerializer.Deserialize(msg.Message!);
                 if (sseEvent is null)
                 {
                     _logger.LogWarning("[RedisPubSub] Failed to deserialize incoming message.");

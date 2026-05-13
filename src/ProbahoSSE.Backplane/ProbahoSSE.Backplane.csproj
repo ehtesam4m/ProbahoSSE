@@ -1,0 +1,11 @@
+<Project Sdk="Microsoft.NET.Sdk">
+  <PropertyGroup>
+    <IsPackable>true</IsPackable>
+    <PackageId>ProbahoSSE.Backplane</PackageId>
+    <Description>Shared backplane infrastructure for ProbahoSSE.</Description>
+  </PropertyGroup>
+  <ItemGroup>
+    <ProjectReference Include="..\ProbahoSSE\ProbahoSSE.csproj" />
+  </ItemGroup>
+</Project>
+

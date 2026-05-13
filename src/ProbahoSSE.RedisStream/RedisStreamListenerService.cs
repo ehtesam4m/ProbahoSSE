@@ -1,7 +1,7 @@
 using Microsoft.Extensions.Hosting;
 using Microsoft.Extensions.Logging;
 using ProbahoSSE.Abstractions;
-using ProbahoSSE.Backplane.Redis;
+using ProbahoSSE.Backplane;
 using ProbahoSSE.Models;
 using StackExchange.Redis;
 
@@ -87,7 +87,7 @@ public sealed class RedisStreamListenerService : BackgroundService
                         continue;
                     }
 
-                    var sseEvent = RedisEventSerializer.Deserialize(payloadField!);
+                    var sseEvent = SseEventSerializer.Deserialize(payloadField!);
                     if (sseEvent is null)
                     {
                         _logger.LogWarning("[RedisStream] Failed to deserialize entry {Id}.", entry.Id);
