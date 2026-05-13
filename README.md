@@ -6,7 +6,7 @@
 [![NuGet ProbahoSSE](https://img.shields.io/nuget/v/ProbahoSSE?label=ProbahoSSE&logo=nuget)](https://www.nuget.org/packages/ProbahoSSE)
 [![NuGet RedisPubSub](https://img.shields.io/nuget/v/ProbahoSSE.RedisPubSub?label=ProbahoSSE.RedisPubSub&logo=nuget)](https://www.nuget.org/packages/ProbahoSSE.RedisPubSub)
 [![NuGet RedisStream](https://img.shields.io/nuget/v/ProbahoSSE.RedisStream?label=ProbahoSSE.RedisStream&logo=nuget)](https://www.nuget.org/packages/ProbahoSSE.RedisStream)
-[![Build](https://github.com/your-org/ProbahoSSE/actions/workflows/ci.yml/badge.svg)](https://github.com/your-org/ProbahoSSE/actions)
+[![Build](https://github.com/ehtesam4m/ProbahoSSE/actions/workflows/build.yml/badge.svg)](https://github.com/ehtesam4m/ProbahoSSE/actions)
 [![License: MIT](https://img.shields.io/badge/license-MIT-blue.svg)](LICENSE)
 
 ProbahoSSE is a lightweight .NET 10 library that adds multi-instance Server-Sent Events to ASP.NET Core via a **pluggable backplane**. Ship with Redis today, swap to RabbitMQ or Kafka tomorrow — the core library does not care. It sits on top of the native `TypedResults.ServerSentEvents` API, so the SSE framing is handled by the runtime, not by a pile of `response.WriteAsync(...)` calls.
@@ -151,9 +151,32 @@ app.UseProbahoSse();
 // The second argument resolves the group from the request.
 // Return null or empty string to skip group assignment.
 app.MapProbahoSse("/sse", ctx => ctx.Request.Query["group"].FirstOrDefault());
+
+// OR — use your own minimal API endpoint mapper (e.g. group from route. UserId can be your group)
+app.MapGet("/users/{userId}/sse", (string userId, HttpContext ctx) =>
+    SseEndpointHandler.HandleAsync(ctx, userId));
+
+// OR — use from an MVC controller action
+// SseEndpointHandler.HandleAsync takes the current HttpContext so it works anywhere:
+
+[ApiController]
+[Route("api/[controller]")]
+public class EventsController : ControllerBase
+{
+    // Group from route segment
+    [HttpGet("{group}/stream")]
+    public Task Stream(string group) =>
+         SseEndpointHandler.HandleAsync(HttpContext, group);
+
+    // Group from authenticated user identity
+     [HttpGet("stream")]
+     [Authorize]
+     public Task Stream() =>
+         SseEndpointHandler.HandleAsync(HttpContext,
+             User.FindFirstValue(ClaimTypes.NameIdentifier));
+ }
 ```
 
-Clients connect with `GET /sse?group=alice`. Every connection is registered under the group name returned by your resolver.
 
 ### 4. Publish events
 
