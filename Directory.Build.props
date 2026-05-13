@@ -15,8 +15,8 @@
     <Description>A high-performance .NET 10 Server-Sent Events (SSE) library with Redis backplane support.</Description>
     <Copyright>Copyright © 2026 ProbahoSSE Contributors</Copyright>
     <PackageLicenseExpression>MIT</PackageLicenseExpression>
-    <PackageProjectUrl>https://github.com/probahosse/ProbahoSSE</PackageProjectUrl>
-    <RepositoryUrl>https://github.com/probahosse/ProbahoSSE</RepositoryUrl>
+    <PackageProjectUrl>https://github.com/ehtesam4m/ProbahoSSE</PackageProjectUrl>
+    <RepositoryUrl>https://github.com/ehtesam4m/ProbahoSSE</RepositoryUrl>
     <RepositoryType>git</RepositoryType>
     <PackageTags>sse;server-sent-events;redis;realtime;dotnet;aspnetcore</PackageTags>
     <PackageReadmeFile>README.md</PackageReadmeFile>
@@ -40,8 +40,8 @@
        Scoped to packable projects only; samples and internal shared libs are excluded. -->
   <ItemGroup Condition="'$(IsPackable)' != 'false'">
     <PackageReference Include="MinVer" PrivateAssets="All" />
-    <!-- Bundle the repo README into every NuGet package (required by PackageReadmeFile) -->
-    <None Include="$(MSBuildThisFileDirectory)README.md" Pack="true" PackagePath="\" />
+    <!-- Each packable project has its own README.md bundled as the NuGet package readme -->
+    <None Include="README.md" Pack="true" PackagePath="\" />
   </ItemGroup>
 </Project>
 
