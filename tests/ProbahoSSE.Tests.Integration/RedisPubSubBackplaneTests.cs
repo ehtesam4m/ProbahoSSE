@@ -1,7 +1,6 @@
 using Microsoft.Extensions.Logging.Abstractions;
 using Microsoft.Extensions.Options;
 using ProbahoSSE.Abstractions;
-using ProbahoSSE.Backplane.Redis;
 using ProbahoSSE.Models;
 using ProbahoSSE.RedisPubSub;
 using StackExchange.Redis;
@@ -36,7 +35,7 @@ public sealed class RedisPubSubBackplaneTests : IAsyncLifetime
 
     private RedisPubSubBackplane MakeBackplane(string prefix = "test")
     {
-        var opts = Options.Create(new RedisBackplaneOptions { ChannelPrefix = prefix });
+        var opts = Options.Create(new RedisPubSubOptions { ChannelPrefix = prefix });
         return new RedisPubSubBackplane(_mux, opts, NullLogger<RedisPubSubBackplane>.Instance);
     }
 

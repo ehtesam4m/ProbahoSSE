@@ -1,7 +1,7 @@
 using Microsoft.Extensions.Logging;
 using Microsoft.Extensions.Options;
 using ProbahoSSE.Abstractions;
-using ProbahoSSE.Backplane.Redis;
+using ProbahoSSE.Backplane;
 using ProbahoSSE.Models;
 using StackExchange.Redis;
 
@@ -15,7 +15,7 @@ namespace ProbahoSSE.RedisPubSub;
 public sealed class RedisPubSubBackplane : IProbahoSseBackplane, IAsyncDisposable
 {
     private readonly IConnectionMultiplexer _redis;
-    private readonly RedisBackplaneOptions _options;
+    private readonly RedisPubSubOptions _options;
     private readonly ILogger<RedisPubSubBackplane> _logger;
 
     /// <summary>The Redis channel name all instances publish/subscribe to.</summary>
@@ -24,7 +24,7 @@ public sealed class RedisPubSubBackplane : IProbahoSseBackplane, IAsyncDisposabl
     /// <summary>Initializes the Redis Pub/Sub backplane.</summary>
     public RedisPubSubBackplane(
         IConnectionMultiplexer redis,
-        IOptions<RedisBackplaneOptions> options,
+        IOptions<RedisPubSubOptions> options,
         ILogger<RedisPubSubBackplane> logger)
     {
         _redis = redis;
@@ -36,7 +36,6 @@ public sealed class RedisPubSubBackplane : IProbahoSseBackplane, IAsyncDisposabl
     /// <inheritdoc />
     public Task PublishToGroupAsync(string group, IProbahoSseEvent sseEvent, CancellationToken cancellationToken = default)
     {
-        // Stamp the group onto the event before serializing so the listener can route it.
         var stamped = sseEvent is ProbahoSseEvent e
             ? e with { Group = group }
             : sseEvent;
@@ -46,7 +45,6 @@ public sealed class RedisPubSubBackplane : IProbahoSseBackplane, IAsyncDisposabl
     /// <inheritdoc />
     public Task PublishToAllAsync(IProbahoSseEvent sseEvent, CancellationToken cancellationToken = default)
     {
-        // Stamp the broadcast sentinel so the listener calls BroadcastAsync explicitly.
         var stamped = sseEvent is ProbahoSseEvent e
             ? e with { Group = ProbahoSseGroups.Broadcast }
             : sseEvent;
@@ -56,16 +54,11 @@ public sealed class RedisPubSubBackplane : IProbahoSseBackplane, IAsyncDisposabl
     private async Task PublishToChannelAsync(IProbahoSseEvent sseEvent)
     {
         var subscriber = _redis.GetSubscriber();
-        var payload = RedisEventSerializer.Serialize(sseEvent);
+        var payload = SseEventSerializer.Serialize(sseEvent);
         _logger.LogDebug("[PubSub] Publishing event id={Id} group={Group} to channel {Channel}",
             sseEvent.Id, sseEvent.Group, ChannelName);
         await subscriber.PublishAsync(RedisChannel.Literal(ChannelName), payload).ConfigureAwait(false);
     }
-
-    /// <summary>
-    /// Not used directly — subscription is managed by <see cref="RedisPubSubListenerService"/>.
-    /// Calling this will throw <see cref="NotSupportedException"/>.
-    /// </summary>
 
     internal ISubscriber GetSubscriber() => _redis.GetSubscriber();
 

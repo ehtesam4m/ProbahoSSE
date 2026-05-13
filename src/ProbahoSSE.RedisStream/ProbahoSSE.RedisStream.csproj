@@ -6,7 +6,7 @@
   </PropertyGroup>
   <ItemGroup>
     <ProjectReference Include="..\ProbahoSSE\ProbahoSSE.csproj" />
-    <ProjectReference Include="..\ProbahoSSE.Backplane.Redis\ProbahoSSE.Backplane.Redis.csproj" />
+    <ProjectReference Include="..\ProbahoSSE.Backplane\ProbahoSSE.Backplane.csproj" />
   </ItemGroup>
   <ItemGroup>
     <PackageReference Include="StackExchange.Redis" />
@@ -16,4 +16,3 @@
     <PackageReference Include="Microsoft.Extensions.Hosting.Abstractions" />
   </ItemGroup>
 </Project>
-

@@ -3,10 +3,11 @@ using System.Text.Json.Serialization;
 using ProbahoSSE.Abstractions;
 using ProbahoSSE.Models;
 
-namespace ProbahoSSE.Backplane.Redis;
+namespace ProbahoSSE.Backplane;
 
 /// <summary>
 /// JSON serialization context for AOT-compatible serialization of SSE events.
+/// Used by all backplane implementations (Redis, RabbitMQ, etc.).
 /// </summary>
 [JsonSerializable(typeof(ProbahoSseEvent))]
 [JsonSourceGenerationOptions(PropertyNamingPolicy = JsonKnownNamingPolicy.CamelCase)]
@@ -15,9 +16,10 @@ public partial class ProbahoSseJsonContext : JsonSerializerContext
 }
 
 /// <summary>
-/// Shared serialization helpers for Redis backplane implementations.
+/// Shared serialization helpers for ProbahoSSE backplane implementations.
+/// Provides AOT-compatible JSON serialize/deserialize for IProbahoSseEvent.
 /// </summary>
-public static class RedisEventSerializer
+public static class SseEventSerializer
 {
     /// <summary>Serializes an SSE event to a JSON string.</summary>
     public static string Serialize(IProbahoSseEvent sseEvent)
@@ -35,4 +37,3 @@ public static class RedisEventSerializer
     public static IProbahoSseEvent? Deserialize(string json)
         => JsonSerializer.Deserialize(json, ProbahoSseJsonContext.Default.ProbahoSseEvent);
 }
-

@@ -1,7 +1,6 @@
 using Microsoft.Extensions.Logging.Abstractions;
 using Microsoft.Extensions.Options;
 using ProbahoSSE.Abstractions;
-using ProbahoSSE.Backplane.Redis;
 using ProbahoSSE.Models;
 using ProbahoSSE.RedisStream;
 using StackExchange.Redis;
@@ -36,7 +35,7 @@ public sealed class RedisStreamBackplaneTests : IAsyncLifetime
 
     private RedisStreamBackplane MakeBackplane(string prefix)
     {
-        var opts = Options.Create(new RedisBackplaneOptions
+        var opts = Options.Create(new RedisStreamOptions
         {
             ChannelPrefix = prefix,
             StreamMaxLength = 1000
