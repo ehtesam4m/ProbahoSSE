@@ -8,10 +8,12 @@ using StackExchange.Redis;
 namespace ProbahoSSE.RedisStream;
 
 /// <summary>
-/// A <see cref="BackgroundService"/> that owns the Redis Stream <c>XREADGROUP</c> poll loop
-/// for this server instance. On startup it creates a unique Consumer Group so every instance
-/// independently receives every message (fan-out). Received messages are forwarded to the
-/// local <see cref="IProbahoSseManager"/> to broadcast to connected SSE clients.
+/// A <see cref="BackgroundService"/> that owns the Redis Stream <c>XREAD</c> loop
+/// for this server instance. Uses <c>XREAD</c> without consumer groups so every instance
+/// independently reads all messages — no stale group accumulation on autoscaling.
+/// The in-memory <c>_lastId</c> tracks the stream position for the lifetime of this process.
+/// Replay of missed events for reconnecting browsers is handled separately by
+/// <see cref="RedisStreamBackplane.ReplayFromAsync"/> via <c>XRANGE</c>.
 /// </summary>
 public sealed class RedisStreamListenerService : BackgroundService
 {
@@ -19,9 +21,9 @@ public sealed class RedisStreamListenerService : BackgroundService
     private readonly IProbahoSseManager _manager;
     private readonly ILogger<RedisStreamListenerService> _logger;
 
-    // Unique per server instance — intentional so every instance gets all messages (fan-out).
-    private readonly string _consumerGroup = $"probaho-group-{Guid.NewGuid():N}";
-    private readonly string _consumerName = $"probaho-consumer-{Guid.NewGuid():N}";
+    // Tracks the last stream entry ID read by this instance.
+    // Initialized in ExecuteAsync to the stream's current tail so only new messages are delivered.
+    private string _lastId = "0-0";
 
     /// <summary>Initializes the listener service.</summary>
     public RedisStreamListenerService(
@@ -37,53 +39,52 @@ public sealed class RedisStreamListenerService : BackgroundService
     /// <inheritdoc />
     protected override async Task ExecuteAsync(CancellationToken stoppingToken)
     {
-        var db = _backplane.GetDatabase();
+        _logger.LogInformation("[RedisStream] Read loop started (XREAD, no consumer groups).");
 
-        // Create this instance's unique Consumer Group starting at the latest stream entry ($).
-        // BUSYGROUP means the group already exists — safe to ignore.
+        // Resolve the current tail of the stream so we only deliver new messages going forward.
+        // This is equivalent to XREAD $ — we capture the last ID once at startup.
+        var db = _backplane.GetDatabase();
         try
         {
-            await db.StreamCreateConsumerGroupAsync(
-                _backplane.StreamKey, _consumerGroup, StreamPosition.NewMessages).ConfigureAwait(false);
-
-            _logger.LogInformation(
-                "[RedisStream] Consumer group created. Stream={Stream} Group={Group} Consumer={Consumer}",
-                _backplane.StreamKey, _consumerGroup, _consumerName);
+            var info = await db.StreamInfoAsync(_backplane.StreamKey).ConfigureAwait(false);
+            _lastId = info.LastEntry.Id.ToString();
         }
-        catch (RedisServerException ex) when (ex.Message.Contains("BUSYGROUP"))
+        catch
         {
-            // Already exists — harmless on restart.
+            // Stream doesn't exist yet — start from the very beginning.
+            _lastId = "0-0";
         }
 
-        _logger.LogInformation("[RedisStream] Read loop started.");
+        _logger.LogInformation("[RedisStream] Starting from stream position {LastId}.", _lastId);
 
         while (!stoppingToken.IsCancellationRequested)
         {
             try
             {
-                // XREADGROUP: fetch up to 100 entries not yet delivered to this consumer.
-                var entries = await db.StreamReadGroupAsync(
+                // XREAD: fetch up to 100 entries after _lastId.
+                // StackExchange.Redis does not support BLOCK on the shared multiplexer,
+                // so we poll with a short back-off when no messages are available.
+                var entries = await db.StreamReadAsync(
                     _backplane.StreamKey,
-                    _consumerGroup,
-                    _consumerName,
-                    StreamPosition.NewMessages,
+                    (RedisValue)_lastId,
                     count: 100).ConfigureAwait(false);
 
                 if (entries is null || entries.Length == 0)
                 {
-                    // No new messages — short back-off before polling again.
-                    await Task.Delay(100, stoppingToken).ConfigureAwait(false);
+                    // No new messages — back-off before polling again (configurable via StreamPollingIntervalMs).
+                    await Task.Delay(_backplane.PollingIntervalMs, stoppingToken).ConfigureAwait(false);
                     continue;
                 }
 
                 foreach (var entry in entries)
                 {
+                    // Always advance _lastId so next XREAD starts after this entry.
+                    _lastId = entry.Id.ToString();
+
                     var payloadField = entry["payload"];
                     if (payloadField.IsNullOrEmpty)
                     {
-                        // ACK malformed entries so they don't clog the PEL.
-                        await db.StreamAcknowledgeAsync(_backplane.StreamKey, _consumerGroup, entry.Id)
-                            .ConfigureAwait(false);
+                        _logger.LogWarning("[RedisStream] Entry {Id} has no payload — skipped.", entry.Id);
                         continue;
                     }
 
@@ -91,8 +92,6 @@ public sealed class RedisStreamListenerService : BackgroundService
                     if (sseEvent is null)
                     {
                         _logger.LogWarning("[RedisStream] Failed to deserialize entry {Id}.", entry.Id);
-                        await db.StreamAcknowledgeAsync(_backplane.StreamKey, _consumerGroup, entry.Id)
-                            .ConfigureAwait(false);
                         continue;
                     }
 
@@ -100,12 +99,9 @@ public sealed class RedisStreamListenerService : BackgroundService
 
                     if (string.IsNullOrEmpty(group))
                     {
-                        // No group set — drop to prevent accidental fan-out to all users.
                         _logger.LogWarning(
                             "[RedisStream] Entry {EntryId} (event id={EventId}) has no group — dropped to prevent data leak. " +
                             "Call PublishToAllAsync for intentional fan-out.", entry.Id, sseEvent.Id);
-                        await db.StreamAcknowledgeAsync(_backplane.StreamKey, _consumerGroup, entry.Id)
-                            .ConfigureAwait(false);
                         continue;
                     }
 
@@ -124,10 +120,6 @@ public sealed class RedisStreamListenerService : BackgroundService
                     {
                         _logger.LogError(ex, "[RedisStream] Error broadcasting entry {Id}.", entry.Id);
                     }
-
-                    // ACK after successful delivery to remove from the Pending Entries List (PEL).
-                    await db.StreamAcknowledgeAsync(_backplane.StreamKey, _consumerGroup, entry.Id)
-                        .ConfigureAwait(false);
                 }
             }
             catch (OperationCanceledException)
@@ -143,5 +135,12 @@ public sealed class RedisStreamListenerService : BackgroundService
 
         _logger.LogInformation("[RedisStream] Read loop stopped.");
     }
-}
 
+    /// <inheritdoc />
+    public override Task StopAsync(CancellationToken cancellationToken)
+    {
+        // Nothing to clean up in Redis — no consumer groups were created.
+        _logger.LogInformation("[RedisStream] Read loop stopping.");
+        return base.StopAsync(cancellationToken);
+    }
+}
