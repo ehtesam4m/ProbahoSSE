@@ -41,6 +41,8 @@ Project("{2150E333-8FDC-42A3-9474-1A3956D46DE8}") = "SolutionItems", "SolutionIt
 		.github\workflows\publish.yml = .github\workflows\publish.yml
 		.github\workflows\build.yml = .github\workflows\build.yml
 		.gitignore = .gitignore
+		CHANGELOG.md = CHANGELOG.md
+		.github\workflows\changelog-release.yml = .github\workflows\changelog-release.yml
 	EndProjectSection
 EndProject
 Project("{FAE04EC0-301F-11D3-BF4B-00C04F79EFBC}") = "ProbahoSSE.Backplane", "src\ProbahoSSE.Backplane\ProbahoSSE.Backplane.csproj", "{3A579E0B-3549-4C14-A5CC-3A98E224C8F4}"

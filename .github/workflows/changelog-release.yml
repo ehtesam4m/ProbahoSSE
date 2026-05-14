@@ -1,0 +1,98 @@
+name: Changelog Release
+
+# Manually create or update a GitHub Release from CHANGELOG.md for a specific tag.
+# Use this to backfill releases for existing tags or refresh release notes after
+# updating CHANGELOG.md.
+#
+# Usage:
+#   Actions → Changelog Release → Run workflow → enter tag (e.g. v0.1.0)
+
+on:
+  workflow_dispatch:
+    inputs:
+      tag:
+        description: 'Git tag to create/update the release for (e.g. v0.1.0)'
+        required: true
+        type: string
+
+jobs:
+  changelog-release:
+    name: Create or Update GitHub Release
+    runs-on: ubuntu-latest
+    permissions:
+      contents: write
+
+    steps:
+      - name: Checkout repository at tag
+        uses: actions/checkout@v4
+        with:
+          ref: ${{ inputs.tag }}
+
+      - name: Verify tag exists
+        run: |
+          TAG="${{ inputs.tag }}"
+          if ! git rev-parse "$TAG" >/dev/null 2>&1; then
+            echo "::error::Tag '$TAG' does not exist in this repository."
+            exit 1
+          fi
+          echo "Tag '$TAG' found."
+
+      - name: Extract changelog section for ${{ inputs.tag }}
+        id: changelog
+        run: |
+          TAG="${{ inputs.tag }}"
+          VERSION="${TAG#v}"   # strip leading 'v'
+
+          NOTES=$(awk "/^## \[${VERSION}\]/{found=1; next} found && /^## \[/{exit} found{print}" CHANGELOG.md \
+            | sed '/^[[:space:]]*$/{ /./!d }' \
+            | sed '/^---/d')
+
+          if [ -z "$NOTES" ]; then
+            echo "::error::No changelog entry found for '${TAG}' in CHANGELOG.md."
+            echo "Add a '## [${VERSION}]' section to CHANGELOG.md and re-run this workflow."
+            exit 1
+          fi
+
+          echo "Extracted notes for ${TAG}:"
+          echo "$NOTES"
+          echo "$NOTES" > /tmp/release_notes.md
+
+      - name: Check if GitHub Release already exists
+        id: check
+        env:
+          GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+        run: |
+          TAG="${{ inputs.tag }}"
+          if gh release view "$TAG" --repo "$GITHUB_REPOSITORY" >/dev/null 2>&1; then
+            echo "exists=true" >> "$GITHUB_OUTPUT"
+            echo "Release for $TAG already exists — will update."
+          else
+            echo "exists=false" >> "$GITHUB_OUTPUT"
+            echo "No release for $TAG found — will create."
+          fi
+
+      - name: Create GitHub Release
+        if: steps.check.outputs.exists == 'false'
+        uses: softprops/action-gh-release@v2
+        with:
+          tag_name: ${{ inputs.tag }}
+          name: ${{ inputs.tag }}
+          body_path: /tmp/release_notes.md
+          generate_release_notes: true   # appends "What's Changed" PR list + full changelog diff link
+          draft: false
+          prerelease: false
+        env:
+          GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+
+      - name: Update existing GitHub Release
+        if: steps.check.outputs.exists == 'true'
+        env:
+          GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+        run: |
+          gh release edit "${{ inputs.tag }}" \
+            --title "${{ inputs.tag }}" \
+            --notes-file /tmp/release_notes.md \
+            --repo "$GITHUB_REPOSITORY"
+          echo "Release ${{ inputs.tag }} updated successfully."
+
+
