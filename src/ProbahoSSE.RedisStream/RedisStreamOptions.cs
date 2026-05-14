@@ -21,4 +21,11 @@ public sealed class RedisStreamOptions
     /// Used with XTRIM MAXLEN to prevent memory exhaustion. Default is 10,000.
     /// </summary>
     public int StreamMaxLength { get; set; } = 10_000;
+
+    /// <summary>
+    /// Gets or sets the polling interval in milliseconds used by the listener loop
+    /// when no new messages are available. Lower values reduce delivery latency at
+    /// the cost of more frequent Redis commands. Default is 100ms (10 polls/second).
+    /// </summary>
+    public int StreamPollingIntervalMs { get; set; } = 500;
 }

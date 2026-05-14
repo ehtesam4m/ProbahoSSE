@@ -8,9 +8,10 @@ using StackExchange.Redis;
 namespace ProbahoSSE.RedisStream;
 
 /// <summary>
-/// An <see cref="IProbahoSseBackplane"/> implementation using Redis Streams for at-least-once delivery
-/// with per-instance consumer groups and Last-Event-ID message replay support.
-/// The read loop and fan-out logic is owned by <see cref="RedisStreamListenerService"/>.
+/// An <see cref="IProbahoSseBackplane"/> implementation using Redis Streams for live fan-out
+/// and Last-Event-ID message replay support. The live read loop is owned by
+/// <see cref="RedisStreamListenerService"/> using <c>XREAD</c> without consumer groups.
+/// Replay of missed events uses <c>XRANGE</c> via <see cref="ReplayFromAsync"/>.
 /// </summary>
 public sealed class RedisStreamBackplane : IProbahoSseBackplane, IProbahoSseReplayable, IAsyncDisposable
 {
@@ -33,7 +34,7 @@ public sealed class RedisStreamBackplane : IProbahoSseBackplane, IProbahoSseRepl
     }
 
     internal IDatabase GetDatabase() => _redis.GetDatabase();
-    internal RedisStreamOptions Options => _options;
+    internal int PollingIntervalMs => _options.StreamPollingIntervalMs;
 
     /// <inheritdoc />
     public Task PublishToGroupAsync(string group, IProbahoSseEvent sseEvent, CancellationToken cancellationToken = default)

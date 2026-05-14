@@ -6,7 +6,7 @@ COPY Directory.Build.props Directory.Packages.props ./
 
 # Copy source projects
 COPY src/ProbahoSSE/ src/ProbahoSSE/
-COPY src/ProbahoSSE.Backplane.Redis/ src/ProbahoSSE.Backplane.Redis/
+COPY src/ProbahoSSE.Backplane/ src/ProbahoSSE.Backplane/
 COPY src/ProbahoSSE.RedisStream/ src/ProbahoSSE.RedisStream/
 
 # Copy sample API project
@@ -24,4 +24,3 @@ ENV ASPNETCORE_URLS=http://+:8080
 EXPOSE 8080
 
 ENTRYPOINT ["dotnet", "Sample.RedisStream.Api.dll"]
-
