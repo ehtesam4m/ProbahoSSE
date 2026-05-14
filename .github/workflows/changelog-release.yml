@@ -26,7 +26,8 @@ jobs:
       - name: Checkout repository at tag
         uses: actions/checkout@v4
         with:
-          ref: ${{ inputs.tag }}
+          ref: main        # CHANGELOG.md is read from main; PRs/commits are fetched via GitHub API
+          fetch-depth: 0   # fetch all history so tags are available for verification
 
       - name: Verify tag exists
         run: |
@@ -94,5 +95,4 @@ jobs:
             --notes-file /tmp/release_notes.md \
             --repo "$GITHUB_REPOSITORY"
           echo "Release ${{ inputs.tag }} updated successfully."
-
 
