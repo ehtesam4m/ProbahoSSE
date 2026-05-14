@@ -4,8 +4,11 @@
 > Because SSE on one service instance is easy — it's the second, third and more instances that makes things complex. 😄
 
 [![NuGet ProbahoSSE](https://img.shields.io/nuget/v/ProbahoSSE?label=ProbahoSSE&logo=nuget)](https://www.nuget.org/packages/ProbahoSSE)
+[![Downloads](https://img.shields.io/nuget/dt/ProbahoSSE?logo=nuget&label=downloads)](https://www.nuget.org/packages/ProbahoSSE)
 [![NuGet RedisPubSub](https://img.shields.io/nuget/v/ProbahoSSE.RedisPubSub?label=ProbahoSSE.RedisPubSub&logo=nuget)](https://www.nuget.org/packages/ProbahoSSE.RedisPubSub)
+[![Downloads](https://img.shields.io/nuget/dt/ProbahoSSE.RedisPubSub?logo=nuget&label=downloads)](https://www.nuget.org/packages/ProbahoSSE.RedisPubSub)
 [![NuGet RedisStream](https://img.shields.io/nuget/v/ProbahoSSE.RedisStream?label=ProbahoSSE.RedisStream&logo=nuget)](https://www.nuget.org/packages/ProbahoSSE.RedisStream)
+[![Downloads](https://img.shields.io/nuget/dt/ProbahoSSE.RedisStream?logo=nuget&label=downloads)](https://www.nuget.org/packages/ProbahoSSE.RedisStream)
 [![Build](https://github.com/ehtesam4m/ProbahoSSE/actions/workflows/build.yml/badge.svg)](https://github.com/ehtesam4m/ProbahoSSE/actions)
 [![License: MIT](https://img.shields.io/badge/license-MIT-blue.svg)](LICENSE)
 
