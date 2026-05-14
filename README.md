@@ -1,7 +1,7 @@
 # ProbahoSSE  ·  <sub>প্রবাহ — flow</sub>
 
 > **Multi-instance Server-Sent Events for ASP.NET Core, with a pluggable backplane.**
-> Because SSE on a single server is easy, and then someone mentions Kubernetes.
+> Because SSE on one service instance is easy — it's the second, third and more instances that makes things complex. 😄
 
 [![NuGet ProbahoSSE](https://img.shields.io/nuget/v/ProbahoSSE?label=ProbahoSSE&logo=nuget)](https://www.nuget.org/packages/ProbahoSSE)
 [![NuGet RedisPubSub](https://img.shields.io/nuget/v/ProbahoSSE.RedisPubSub?label=ProbahoSSE.RedisPubSub&logo=nuget)](https://www.nuget.org/packages/ProbahoSSE.RedisPubSub)
@@ -9,7 +9,7 @@
 [![Build](https://github.com/ehtesam4m/ProbahoSSE/actions/workflows/build.yml/badge.svg)](https://github.com/ehtesam4m/ProbahoSSE/actions)
 [![License: MIT](https://img.shields.io/badge/license-MIT-blue.svg)](LICENSE)
 
-ProbahoSSE is a lightweight .NET 10 library that adds multi-instance Server-Sent Events to ASP.NET Core via a **pluggable backplane**. Ship with Redis today, swap to RabbitMQ or Kafka tomorrow — the core library does not care. It sits on top of the native `TypedResults.ServerSentEvents` API, so the SSE framing is handled by the runtime, not by a pile of `response.WriteAsync(...)` calls.
+ProbahoSSE is a lightweight .NET 10 library that adds multi-instance Server-Sent Events to ASP.NET Core via a **pluggable backplane**. Ship with Redis today, swap to RabbitMQ tomorrow — the core library does not care. It sits on top of the native `TypedResults.ServerSentEvents` API, so the SSE framing is handled by the runtime, not by a pile of `response.WriteAsync(...)` calls.
 
 ---
 
@@ -71,7 +71,7 @@ A shared backplane. Every instance publishes events to the backplane; every inst
 - **Keep-alive that actually works** — uses `Task.WhenAny(waitToReadTask, keepAliveTask)` so comment frames are sent even during long quiet periods with zero events
 - **Connection limits** — configurable global cap (`MaxGlobalConnections`) and per-group cap (`MaxConnectionsPerUser`); returns `429` when exceeded
 - **`Last-Event-ID` replay** — Stream backplane replays every missed event since the client's last-seen ID on reconnect
-- **Pluggable backplane** — implement `IProbahoSseBackplane` to connect any message broker: Redis, RabbitMQ, Kafka, Azure Service Bus, an in-memory bus for tests — whatever fits your stack
+- **Pluggable backplane** — implement `IProbahoSseBackplane` to connect any message broker: Redis, RabbitMQ, Azure Service Bus, an in-memory bus for tests — whatever fits your stack
 - **Native `TypedResults.ServerSentEvents`** — correct SSE framing (id/event/data + blank-line separator) handled by the runtime
 - **`connected` event on stream open** — clients receive an immediate `event: connected` frame so the browser never sits in an ambiguous pending state
 
@@ -182,7 +182,7 @@ public class EventsController : ControllerBase
 
 <a id="4-publish-events"></a>
 
-Inject `IProbahoSsePublisher` anywhere — a background service, a webhook endpoint, a Kafka consumer, whatever produces events.
+Inject `IProbahoSsePublisher` anywhere — a background service, a webhook endpoint, a RabbitMQ consumer, whatever produces events.
 
 ```csharp
 // Targeted — only connections in group "alice" receive this
@@ -243,7 +243,7 @@ flowchart LR
     B2[Browser B] -->|EventSource| A1
     B3[Browser C] -->|EventSource| A2[ASP.NET Core Instance B]
 
-    A1 -->|publish| R[(Backplane e.g. Redis / RabbitMQ / Kafka)]
+    A1 -->|publish| R[(Backplane e.g. Redis / RabbitMQ)]
     R -->|subscribe / consume| A1
     R -->|subscribe / consume| A2
 
@@ -272,7 +272,7 @@ Each API instance only talks to its own in-memory connection registry. The backp
 
 <a id="pubsub-backplane--probahosse-redispubsub"></a>
 
-Ships with a **Redis Pub/Sub** implementation. The pattern applies equally to RabbitMQ fanout exchanges, Kafka with a shared consumer group, or any other pub/sub primitive.
+Ships with a **Redis Pub/Sub** implementation. The pattern applies equally to RabbitMQ fanout exchanges or any other pub/sub primitive.
 
 ```mermaid
 sequenceDiagram
@@ -299,7 +299,7 @@ sequenceDiagram
 
 <a id="persistent-stream-backplane--probahosse-redisstream"></a>
 
-Ships with a **Redis Streams** implementation. The same pattern works with Kafka, Azure Event Hubs, or any log-structured broker that supports offset-based reads.
+Ships with a **Redis Streams** implementation. The same pattern works with RabbitMQ or any log-structured broker that supports offset-based reads.
 
 ```mermaid
 sequenceDiagram
@@ -318,7 +318,8 @@ sequenceDiagram
 ```
 
 - **Persistent** — messages retained up to `StreamMaxLength`; older entries trimmed automatically
-- `IProbahoSseReplayable` triggers `ReplayFromAsync(lastEventId)` before the live loop
+- Each instance independently polls the stream via `XREAD` — no consumer groups, no stale state on autoscaling
+- `IProbahoSseReplayable` triggers `ReplayFromAsync(lastEventId)` before the live loop; reconnecting browsers replay missed events via `XRANGE`
 - **Best for:** IoT feeds, financial ticks, audit trails
 
 ---
@@ -353,7 +354,7 @@ builder.Services
     .AddHostedService<RabbitMqListenerService>();
 ```
 
-Implement `IProbahoSseReplayable` on the same class to add replay support (e.g. backed by a Kafka offset read or database query).
+Implement `IProbahoSseReplayable` on the same class to add replay support (e.g. backed by a RabbitMQ offset read or database query).
 
 ---
 
@@ -370,13 +371,21 @@ Implement `IProbahoSseReplayable` on the same class to add replay support (e.g. 
 | `KeepAliveInterval` | `TimeSpan` | `30s` | How often keep-alive comment frames are sent to prevent proxy timeouts. |
 | `DefaultEventType` | `string` | `"message"` | Fallback event type when `IProbahoSseEvent.EventType` is null. |
 
-### `RedisBackplaneOptions` *(built-in Redis backplanes only)*
+### `RedisPubSubOptions`
 
 | Property | Type | Default | Description |
 |---|---|---|---|
 | `ConnectionString` | `string` | `"localhost:6379"` | StackExchange.Redis connection string. |
-| `ChannelPrefix` | `string` | `"probaho"` | Prefix for channel names and stream keys. Avoids collisions in a shared Redis instance. |
-| `StreamMaxLength` | `int` | `10 000` | *(Stream only)* Maximum entries retained. Older entries trimmed automatically. |
+| `ChannelPrefix` | `string` | `"probaho"` | Prefix for Redis channel names. Avoids collisions in a shared Redis instance. |
+
+### `RedisStreamOptions`
+
+| Property | Type | Default | Description |
+|---|---|---|---|
+| `ConnectionString` | `string` | `"localhost:6379"` | StackExchange.Redis connection string. |
+| `ChannelPrefix` | `string` | `"probaho"` | Prefix for Redis stream keys. Avoids collisions in a shared Redis instance. |
+| `StreamMaxLength` | `int` | `10 000` | Maximum entries retained. Older entries trimmed automatically. |
+| `StreamPollingIntervalMs` | `int` | `100` | Polling interval (ms) when no new messages are available. Lower = less latency, more Redis load. |
 
 ---
 

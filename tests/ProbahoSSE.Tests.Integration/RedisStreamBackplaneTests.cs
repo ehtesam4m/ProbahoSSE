@@ -11,7 +11,7 @@ namespace ProbahoSSE.Tests.Integration;
 /// <summary>
 /// Integration tests for <see cref="RedisStreamBackplane"/> and <see cref="RedisStreamListenerService"/>
 /// using a real Redis instance via Testcontainers.
-/// Verifies: persistence, fan-out via unique consumer groups, ReplayFromAsync for Last-Event-ID recovery.
+/// Verifies: publish delivery, fan-out via independent XREAD per instance, ReplayFromAsync for Last-Event-ID recovery.
 /// </summary>
 public sealed class RedisStreamBackplaneTests : IAsyncLifetime
 {
@@ -56,7 +56,8 @@ public sealed class RedisStreamBackplaneTests : IAsyncLifetime
         var listener = new RedisStreamListenerService(
             backplane, manager, NullLogger<RedisStreamListenerService>.Instance);
         await listener.StartAsync(cts.Token);
-        await Task.Delay(400, cts.Token); // consumer group creation
+        // Allow time for the XREAD loop to start and register "$" position with Redis.
+        await Task.Delay(1000, cts.Token);
 
         await backplane.PublishToAllAsync(ProbahoSseEvent.Create("stream-payload", "sensor"));
 
@@ -69,12 +70,13 @@ public sealed class RedisStreamBackplaneTests : IAsyncLifetime
         await listener.StopAsync(CancellationToken.None);
     }
 
-    // ── Fan-out: each instance has unique consumer group ─────────────────────
+    // ── Fan-out: each instance independently reads all messages via XREAD ────
 
     [DockerAvailableFact]
-    public async Task PublishAsync_TwoListeners_BothReceiveViaUniqueConsumerGroups()
+    public async Task PublishAsync_TwoListeners_BothReceiveViaIndependentXRead()
     {
-        // Both share the same stream key (same prefix) but each creates its own consumer group.
+        // Both share the same stream key (same prefix). Each instance independently
+        // reads all messages using XREAD — no consumer groups, no coordination needed.
         var bp1 = MakeBackplane("stream-fanout");
         var bp2 = MakeBackplane("stream-fanout");
 
@@ -87,13 +89,14 @@ public sealed class RedisStreamBackplaneTests : IAsyncLifetime
 
         await l1.StartAsync(cts.Token);
         await l2.StartAsync(cts.Token);
-        await Task.Delay(400, cts.Token);
+        // Allow time for both XREAD loops to start and register "$" position with Redis.
+        await Task.Delay(1000, cts.Token);
 
         await bp1.PublishToAllAsync(ProbahoSseEvent.Create("fanout-event"));
 
         await WaitForConditionAsync(() => received1.Count >= 1 && received2.Count >= 1, TimeSpan.FromSeconds(5));
 
-        // Critical: both receive — consumer groups are unique per instance
+        // Critical: both instances receive — each independently reads from the same stream.
         Assert.Single(received1);
         Assert.Single(received2);
         Assert.Equal("fanout-event", received1[0].Data);
@@ -228,6 +231,4 @@ public sealed class RedisStreamBackplaneTests : IAsyncLifetime
             => Task.CompletedTask;
     }
 }
-
-
 
