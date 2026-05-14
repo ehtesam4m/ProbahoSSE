@@ -27,5 +27,5 @@ public sealed class RedisStreamOptions
     /// when no new messages are available. Lower values reduce delivery latency at
     /// the cost of more frequent Redis commands. Default is 100ms (10 polls/second).
     /// </summary>
-    public int StreamPollingIntervalMs { get; set; } = 100;
+    public int StreamPollingIntervalMs { get; set; } = 500;
 }
