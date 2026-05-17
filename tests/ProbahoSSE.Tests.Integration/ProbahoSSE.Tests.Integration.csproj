@@ -12,6 +12,7 @@
     <ProjectReference Include="..\..\src\ProbahoSSE\ProbahoSSE.csproj" />
     <ProjectReference Include="..\..\src\ProbahoSSE.RedisPubSub\ProbahoSSE.RedisPubSub.csproj" />
     <ProjectReference Include="..\..\src\ProbahoSSE.RedisStream\ProbahoSSE.RedisStream.csproj" />
+    <ProjectReference Include="..\..\src\ProbahoSSE.RabbitMq\ProbahoSSE.RabbitMq.csproj" />
   </ItemGroup>
   <ItemGroup>
     <PackageReference Include="xunit" />
@@ -19,8 +20,6 @@
     <PackageReference Include="Microsoft.NET.Test.Sdk" />
     <PackageReference Include="Microsoft.AspNetCore.Mvc.Testing" />
     <PackageReference Include="Testcontainers.Redis" />
+    <PackageReference Include="Testcontainers.RabbitMq" />
   </ItemGroup>
 </Project>
-
-
-
