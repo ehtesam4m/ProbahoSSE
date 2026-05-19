@@ -36,9 +36,10 @@ ProbahoSSE is a lightweight .NET 10 library that adds multi-instance Server-Sent
   - [Bring Your Own Backplane](#bring-your-own-backplane)
 - [Configuration Reference](#configuration-reference)
 - [Samples](#samples)
-  - [Sample.RedisPubSub — Fire & Forget](#sampleredispubsub--fire--forget)
-  - [Sample.RedisStream — Persistent + Replay](#sampleredisstream--persistent--replay)
-  - [Common.IoTSensorSimulator](#commoniotsensorsimulator)
+    - [Sample.RedisPubSub — Fire & Forget](#sampleredispubsub--fire--forget)
+    - [Sample.RedisStream — Persistent + Replay](#sampleredisstream--persistent--replay)
+    - [Sample.RabbitMq — Fire & Forget](#samplerabbitmq--fire--forget)
+    - [Common.IoTSensorSimulator](#commoniotsensorsimulator)
 - [Contributing](#contributing)
 - [License](#license)
 
@@ -77,7 +78,7 @@ A shared backplane. Every instance publishes events to the backplane; every inst
 - **Keep-alive that actually works** — uses `Task.WhenAny(waitToReadTask, keepAliveTask)` so comment frames are sent even during long quiet periods with zero events
 - **Connection limits** — configurable global cap (`MaxGlobalConnections`) and per-group cap (`MaxConnectionsPerUser`); returns `429` when exceeded
 - **`Last-Event-ID` replay** — Stream backplane replays every missed event since the client's last-seen ID on reconnect
-- **Pluggable backplane** — implement `IProbahoSseBackplane` to connect any message broker: Redis, RabbitMQ, Azure Service Bus, an in-memory bus for tests — whatever fits your stack
+- **Pluggable backplane** — implement `IProbahoSseBackplane` to connect any message broker: Redis, Redis Stream, RabbitMQ— whatever fits your stack
 - **Native `TypedResults.ServerSentEvents`** — correct SSE framing (id/event/data + blank-line separator) handled by the runtime
 - **`connected` event on stream open** — clients receive an immediate `event: connected` frame so the browser never sits in an ambiguous pending state
 
@@ -91,25 +92,23 @@ A shared backplane. Every instance publishes events to the backplane; every inst
 
 <a id="1-install-nuget-packages"></a>
 
-Always install the core package. Then pick **one** backplane package — or implement your own.
+Pick **one** backplane package — `ProbahoSSE` core is included transitively:
 
 ```bash
-# Core (always required)
-dotnet add package ProbahoSSE
-
-# Pick a backplane:
-
-# Option A — fire-and-forget pub/sub (ships with Redis implementation)
+# Option A — fire-and-forget pub/sub backed by Redis
 dotnet add package ProbahoSSE.RedisPubSub
 
-# Option B — persistent stream with replay (ships with Redis Streams implementation)
+# Option B — persistent stream with replay backed by Redis Streams
 dotnet add package ProbahoSSE.RedisStream
 
 # Option C — fire-and-forget pub/sub backed by RabbitMQ
 dotnet add package ProbahoSSE.RabbitMq
 ```
 
-> **Using a different broker?** Implement `IProbahoSseBackplane` (and optionally `IProbahoSseReplayable`) and register it with `AddProbahoSse()`. See [Bring Your Own Backplane](#bring-your-own-backplane).
+> **Implementing your own backplane?** Install the core package directly and implement `IProbahoSseBackplane`. See [Bring Your Own Backplane](#bring-your-own-backplane).
+> ```bash
+> dotnet add package ProbahoSSE
+> ```
 
 ### 2. Register services
 
@@ -454,7 +453,7 @@ Implement `IProbahoSseReplayable` on the same class to add replay support (e.g. 
 
 <a id="samples"></a>
 
-Both samples include nginx, two API instances, the IoT Simulator, and a dark-themed browser UI at `http://localhost:8080`. The UI auto-detects the backplane via `/info`, shows live sensor gauges per group, and highlights replayed events in purple.
+All samples include nginx, two API instances, the IoT Simulator, and a dark-themed browser UI at `http://localhost:8080`. The UI auto-detects the backplane via `/info`, shows live sensor gauges per group, and highlights replayed events in purple.
 
 ---
 
@@ -505,6 +504,32 @@ graph TD
 
 ```bash
 cd samples/Sample.RedisStream
+docker compose up --build
+```
+
+---
+
+### Sample.RabbitMq — Fire & Forget
+
+<a id="samplerabbitmq--fire--forget"></a>
+
+```mermaid
+graph TD
+    Sim[IoT Simulator] -->|POST /ingest| API1[rabbitmq-api-1]
+    API1 -->|publish| BP[(RabbitMQ Fanout Exchange)]
+    BP -->|deliver| API1
+    BP -->|deliver| API2[rabbitmq-api-2]
+    Nginx[nginx :8080] --> API1
+    Nginx --> API2
+    Browser -->|http| Nginx
+```
+
+**Demonstrates:** events fan-out across instances via a single RabbitMQ fanout exchange. Events missed while disconnected are gone forever — same behaviour as `Sample.RedisPubSub` but backed by RabbitMQ. The RabbitMQ Management UI at `http://localhost:15672` (guest/guest) lets you inspect the exchange and per-instance queues live.
+
+**Stack:** `rabbitmq` · `simulator` · `rabbitmq-api-1` · `rabbitmq-api-2` · `nginx`
+
+```bash
+cd samples/Sample.RabbitMq
 docker compose up --build
 ```
 
