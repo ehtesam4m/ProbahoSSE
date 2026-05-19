@@ -1,0 +1,19 @@
+<Project Sdk="Microsoft.NET.Sdk">
+  <PropertyGroup>
+    <IsPackable>true</IsPackable>
+    <PackageId>ProbahoSSE.RabbitMq</PackageId>
+    <Description>RabbitMQ fanout backplane for ProbahoSSE — enables fire-and-forget broadcasting across multiple server instances using a single RabbitMQ fanout exchange.</Description>
+  </PropertyGroup>
+  <ItemGroup>
+    <ProjectReference Include="..\ProbahoSSE\ProbahoSSE.csproj" />
+    <ProjectReference Include="..\ProbahoSSE.Backplane\ProbahoSSE.Backplane.csproj" />
+  </ItemGroup>
+  <ItemGroup>
+    <PackageReference Include="RabbitMQ.Client" />
+    <PackageReference Include="Microsoft.Extensions.DependencyInjection.Abstractions" />
+    <PackageReference Include="Microsoft.Extensions.Options" />
+    <PackageReference Include="Microsoft.Extensions.Logging.Abstractions" />
+    <PackageReference Include="Microsoft.Extensions.Hosting.Abstractions" />
+  </ItemGroup>
+</Project>
+

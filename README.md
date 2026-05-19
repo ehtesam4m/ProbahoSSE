@@ -9,6 +9,8 @@
 [![Downloads](https://img.shields.io/nuget/dt/ProbahoSSE.RedisPubSub?logo=nuget&label=downloads)](https://www.nuget.org/packages/ProbahoSSE.RedisPubSub)
 [![NuGet RedisStream](https://img.shields.io/nuget/v/ProbahoSSE.RedisStream?label=ProbahoSSE.RedisStream&logo=nuget)](https://www.nuget.org/packages/ProbahoSSE.RedisStream)
 [![Downloads](https://img.shields.io/nuget/dt/ProbahoSSE.RedisStream?logo=nuget&label=downloads)](https://www.nuget.org/packages/ProbahoSSE.RedisStream)
+[![NuGet RabbitMq](https://img.shields.io/nuget/v/ProbahoSSE.RabbitMq?label=ProbahoSSE.RabbitMq&logo=nuget)](https://www.nuget.org/packages/ProbahoSSE.RabbitMq)
+[![Downloads](https://img.shields.io/nuget/dt/ProbahoSSE.RabbitMq?logo=nuget&label=downloads)](https://www.nuget.org/packages/ProbahoSSE.RabbitMq)
 [![Build](https://github.com/ehtesam4m/ProbahoSSE/actions/workflows/build.yml/badge.svg)](https://github.com/ehtesam4m/ProbahoSSE/actions)
 [![License: MIT](https://img.shields.io/badge/license-MIT-blue.svg)](LICENSE)
 
@@ -30,12 +32,14 @@ ProbahoSSE is a lightweight .NET 10 library that adds multi-instance Server-Sent
   - [Core — ProbahoSSE](#core--probahosse)
   - [Pub/Sub Backplane — ProbahoSSE.RedisPubSub](#pubsub-backplane--probahosse-redispubsub)
   - [Persistent Stream Backplane — ProbahoSSE.RedisStream](#persistent-stream-backplane--probahosse-redisstream)
+  - [RabbitMQ Backplane — ProbahoSSE.RabbitMq](#rabbitmq-backplane--probahosse-rabbitmq)
   - [Bring Your Own Backplane](#bring-your-own-backplane)
 - [Configuration Reference](#configuration-reference)
 - [Samples](#samples)
-  - [Sample.RedisPubSub — Fire & Forget](#sampleredispubsub--fire--forget)
-  - [Sample.RedisStream — Persistent + Replay](#sampleredisstream--persistent--replay)
-  - [Common.IoTSensorSimulator](#commoniotsensorsimulator)
+    - [Sample.RedisPubSub — Fire & Forget](#sampleredispubsub--fire--forget)
+    - [Sample.RedisStream — Persistent + Replay](#sampleredisstream--persistent--replay)
+    - [Sample.RabbitMq — Fire & Forget](#samplerabbitmq--fire--forget)
+    - [Common.IoTSensorSimulator](#commoniotsensorsimulator)
 - [Contributing](#contributing)
 - [License](#license)
 
@@ -74,7 +78,7 @@ A shared backplane. Every instance publishes events to the backplane; every inst
 - **Keep-alive that actually works** — uses `Task.WhenAny(waitToReadTask, keepAliveTask)` so comment frames are sent even during long quiet periods with zero events
 - **Connection limits** — configurable global cap (`MaxGlobalConnections`) and per-group cap (`MaxConnectionsPerUser`); returns `429` when exceeded
 - **`Last-Event-ID` replay** — Stream backplane replays every missed event since the client's last-seen ID on reconnect
-- **Pluggable backplane** — implement `IProbahoSseBackplane` to connect any message broker: Redis, RabbitMQ, Azure Service Bus, an in-memory bus for tests — whatever fits your stack
+- **Pluggable backplane** — implement `IProbahoSseBackplane` to connect any message broker: Redis, Redis Stream, RabbitMQ— whatever fits your stack
 - **Native `TypedResults.ServerSentEvents`** — correct SSE framing (id/event/data + blank-line separator) handled by the runtime
 - **`connected` event on stream open** — clients receive an immediate `event: connected` frame so the browser never sits in an ambiguous pending state
 
@@ -88,22 +92,23 @@ A shared backplane. Every instance publishes events to the backplane; every inst
 
 <a id="1-install-nuget-packages"></a>
 
-Always install the core package. Then pick **one** backplane package — or implement your own.
+Pick **one** backplane package — `ProbahoSSE` core is included transitively:
 
 ```bash
-# Core (always required)
-dotnet add package ProbahoSSE
-
-# Pick a backplane:
-
-# Option A — fire-and-forget pub/sub (ships with Redis implementation)
+# Option A — fire-and-forget pub/sub backed by Redis
 dotnet add package ProbahoSSE.RedisPubSub
 
-# Option B — persistent stream with replay (ships with Redis Streams implementation)
+# Option B — persistent stream with replay backed by Redis Streams
 dotnet add package ProbahoSSE.RedisStream
+
+# Option C — fire-and-forget pub/sub backed by RabbitMQ
+dotnet add package ProbahoSSE.RabbitMq
 ```
 
-> **Using a different broker?** Implement `IProbahoSseBackplane` (and optionally `IProbahoSseReplayable`) and register it with `AddProbahoSse()`. See [Bring Your Own Backplane](#bring-your-own-backplane).
+> **Implementing your own backplane?** Install the core package directly and implement `IProbahoSseBackplane`. See [Bring Your Own Backplane](#bring-your-own-backplane).
+> ```bash
+> dotnet add package ProbahoSSE
+> ```
 
 ### 2. Register services
 
@@ -141,6 +146,24 @@ builder.Services
         redis.ConnectionString = builder.Configuration["Redis:ConnectionString"] ?? "localhost:6379";
         redis.ChannelPrefix    = "my-app";
         redis.StreamMaxLength  = 10_000;
+    });
+```
+
+**Option C — RabbitMQ backplane (fire-and-forget)**
+
+```csharp
+// Program.cs
+builder.Services
+    .AddProbahoSse(options =>
+    {
+        options.KeepAliveInterval = TimeSpan.FromSeconds(20);
+    })
+    .AddRabbitMqBackplane(rabbit =>
+    {
+        rabbit.HostName     = builder.Configuration["RabbitMq:HostName"] ?? "localhost";
+        rabbit.UserName     = builder.Configuration["RabbitMq:UserName"] ?? "guest";
+        rabbit.Password     = builder.Configuration["RabbitMq:Password"] ?? "guest";
+        rabbit.ExchangeName = "my-app";
     });
 ```
 
@@ -327,17 +350,40 @@ sequenceDiagram
 
 ---
 
+### RabbitMQ Backplane — ProbahoSSE.RabbitMq
+
+<a id="rabbitmq-backplane--probahosse-rabbitmq"></a>
+
+Ships with a **RabbitMQ fanout exchange** implementation. A single exchange fans out every message to all bound instance queues.
+
+```
+Publisher → RabbitMQ Fanout Exchange ("probaho")
+                  ↓                         ↓
+    [Queue: instance-A]         [Queue: instance-B]
+    exclusive · auto-delete     exclusive · auto-delete
+                  ↓                         ↓
+         API Instance A              API Instance B
+         local SSE clients           local SSE clients
+```
+
+- **Fire-and-forget** — no message persistence; offline consumers miss events permanently
+- Each instance gets an **exclusive, server-named, auto-delete queue** — cleaned up automatically on disconnect
+- `PublishToAllAsync` stamps events with `ProbahoSseGroups.Broadcast`; the listener broadcasts to all local connections
+- **Best for:** notification feeds, live dashboards, chat
+
+---
+
 ### Bring Your Own Backplane
 
 <a id="bring-your-own-backplane"></a>
 
 ```csharp
-public class RabbitMqBackplane : IProbahoSseBackplane
+public class MyCustomBackplane : IProbahoSseBackplane
 {
     public Task PublishToGroupAsync(string group, IProbahoSseEvent sseEvent,
         CancellationToken ct = default)
     {
-        // publish to RabbitMQ fanout exchange, routing key = group
+        // publish to your broker, routing key = group
     }
 
     public Task PublishToAllAsync(IProbahoSseEvent sseEvent,
@@ -353,11 +399,11 @@ Register it:
 ```csharp
 builder.Services
     .AddProbahoSse()
-    .AddSingleton<IProbahoSseBackplane, RabbitMqBackplane>()
-    .AddHostedService<RabbitMqListenerService>();
+    .AddSingleton<IProbahoSseBackplane, MyCustomBackplane>()
+    .AddHostedService<MyCustomListenerService>();
 ```
 
-Implement `IProbahoSseReplayable` on the same class to add replay support (e.g. backed by a RabbitMQ offset read or database query).
+Implement `IProbahoSseReplayable` on the same class to add replay support (e.g. backed by a database query or a log-structured broker).
 
 ---
 
@@ -390,13 +436,24 @@ Implement `IProbahoSseReplayable` on the same class to add replay support (e.g. 
 | `StreamMaxLength` | `int` | `10 000` | Maximum entries retained. Older entries trimmed automatically. |
 | `StreamPollingIntervalMs` | `int` | `100` | Polling interval (ms) when no new messages are available. Lower = less latency, more Redis load. |
 
+### `RabbitMqOptions`
+
+| Property | Type | Default | Description |
+|---|---|---|---|
+| `HostName` | `string` | `"localhost"` | RabbitMQ host name. |
+| `Port` | `int` | `5672` | AMQP port. |
+| `UserName` | `string` | `"guest"` | RabbitMQ username. |
+| `Password` | `string` | `"guest"` | RabbitMQ password. |
+| `VirtualHost` | `string` | `"/"` | RabbitMQ virtual host. |
+| `ExchangeName` | `string` | `"probaho"` | Fanout exchange name. Shared across all instances. |
+
 ---
 
 ## Samples
 
 <a id="samples"></a>
 
-Both samples include nginx, two API instances, the IoT Simulator, and a dark-themed browser UI at `http://localhost:8080`. The UI auto-detects the backplane via `/info`, shows live sensor gauges per group, and highlights replayed events in purple.
+All samples include nginx, two API instances, the IoT Simulator, and a dark-themed browser UI at `http://localhost:8080`. The UI auto-detects the backplane via `/info`, shows live sensor gauges per group, and highlights replayed events in purple.
 
 ---
 
@@ -447,6 +504,32 @@ graph TD
 
 ```bash
 cd samples/Sample.RedisStream
+docker compose up --build
+```
+
+---
+
+### Sample.RabbitMq — Fire & Forget
+
+<a id="samplerabbitmq--fire--forget"></a>
+
+```mermaid
+graph TD
+    Sim[IoT Simulator] -->|POST /ingest| API1[rabbitmq-api-1]
+    API1 -->|publish| BP[(RabbitMQ Fanout Exchange)]
+    BP -->|deliver| API1
+    BP -->|deliver| API2[rabbitmq-api-2]
+    Nginx[nginx :8080] --> API1
+    Nginx --> API2
+    Browser -->|http| Nginx
+```
+
+**Demonstrates:** events fan-out across instances via a single RabbitMQ fanout exchange. Events missed while disconnected are gone forever — same behaviour as `Sample.RedisPubSub` but backed by RabbitMQ. The RabbitMQ Management UI at `http://localhost:15672` (guest/guest) lets you inspect the exchange and per-instance queues live.
+
+**Stack:** `rabbitmq` · `simulator` · `rabbitmq-api-1` · `rabbitmq-api-2` · `nginx`
+
+```bash
+cd samples/Sample.RabbitMq
 docker compose up --build
 ```
 

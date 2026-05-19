@@ -1,0 +1,72 @@
+name: probaho-rabbitmq
+
+services:
+  # ── Infrastructure ──────────────────────────────────────────────────────────
+  rabbitmq:
+    image: rabbitmq:3-management-alpine
+    healthcheck:
+      test: ["CMD", "rabbitmq-diagnostics", "ping"]
+      interval: 5s
+      timeout: 5s
+      retries: 10
+    ports:
+      - "15672:15672"   # RabbitMQ Management UI — http://localhost:15672 (guest/guest)
+
+  # ── IoT Sensor Simulator ─────────────────────────────────────────────────────
+  simulator:
+    build:
+      context: ../..
+      dockerfile: samples/Common.IoTSensorSimulator/Dockerfile
+    depends_on:
+      - rabbitmq-api-1
+    environment:
+      Simulator__IngestUrl: http://api-1:8080/ingest
+    restart: unless-stopped
+
+  # ── API Instance 1 ──────────────────────────────────────────────────────────
+  rabbitmq-api-1:
+    build:
+      context: ../..
+      dockerfile: samples/Sample.RabbitMq/Dockerfile
+    depends_on:
+      rabbitmq:
+        condition: service_healthy
+    environment:
+      RabbitMq__HostName: rabbitmq
+      ASPNETCORE_URLS: http://+:8080
+    networks:
+      default:
+        aliases:
+          - api-1
+    restart: unless-stopped
+
+  # ── API Instance 2 ──────────────────────────────────────────────────────────
+  rabbitmq-api-2:
+    build:
+      context: ../..
+      dockerfile: samples/Sample.RabbitMq/Dockerfile
+    depends_on:
+      rabbitmq:
+        condition: service_healthy
+    environment:
+      RabbitMq__HostName: rabbitmq
+      ASPNETCORE_URLS: http://+:8080
+    networks:
+      default:
+        aliases:
+          - api-2
+    restart: unless-stopped
+
+  # ── Nginx Reverse Proxy + HTML ───────────────────────────────────────────────
+  nginx:
+    image: nginx:1.27-alpine
+    ports:
+      - "8080:8080"
+    volumes:
+      - ../nginx/nginx.conf:/etc/nginx/nginx.conf:ro
+      - ../nginx/html:/usr/share/nginx/html:ro
+    depends_on:
+      - rabbitmq-api-1
+      - rabbitmq-api-2
+    restart: unless-stopped
+
