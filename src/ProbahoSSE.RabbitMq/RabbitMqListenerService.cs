@@ -46,6 +46,63 @@ public sealed class RabbitMqListenerService : IHostedService, IAsyncDisposable
             "[RabbitMq] Connecting to {Host}:{Port}, exchange '{Exchange}'",
             _options.HostName, _options.Port, _options.ExchangeName);
 
+        _connection = await CreateConnectionAsync(cancellationToken).ConfigureAwait(false);
+        await SetupPublishChannelAsync(_connection, cancellationToken).ConfigureAwait(false);
+        await SetupConsumeChannelAsync(_connection, cancellationToken).ConfigureAwait(false);
+    }
+
+    /// <inheritdoc />
+    public async Task StopAsync(CancellationToken cancellationToken)
+    {
+        _logger.LogInformation("[RabbitMq] Shutting down listener.");
+
+        if (_consumeChannel is not null)
+        {
+            try
+            {
+                await _consumeChannel.CloseAsync(cancellationToken).ConfigureAwait(false);
+            }
+            catch (Exception ex)
+            {
+                _logger.LogError(ex, "[RabbitMq] Error closing consume channel.");
+            }
+        }
+
+        if (_publishChannel is not null)
+        {
+            try
+            {
+                await _publishChannel.CloseAsync(cancellationToken).ConfigureAwait(false);
+            }
+            catch (Exception ex)
+            {
+                _logger.LogError(ex, "[RabbitMq] Error closing publish channel.");
+            }
+        }
+
+        if (_connection is not null)
+        {
+            try
+            {
+                await _connection.CloseAsync(cancellationToken).ConfigureAwait(false);
+            }
+            catch (Exception ex)
+            {
+                _logger.LogError(ex, "[RabbitMq] Error closing connection.");
+            }
+        }
+    }
+
+    /// <inheritdoc />
+    public async ValueTask DisposeAsync()
+    {
+        if (_consumeChannel is not null) await _consumeChannel.DisposeAsync().ConfigureAwait(false);
+        if (_publishChannel is not null) await _publishChannel.DisposeAsync().ConfigureAwait(false);
+        if (_connection is not null) await _connection.DisposeAsync().ConfigureAwait(false);
+    }
+
+    private Task<IConnection> CreateConnectionAsync(CancellationToken cancellationToken)
+    {
         var factory = new ConnectionFactory
         {
             HostName = _options.HostName,
@@ -55,10 +112,12 @@ public sealed class RabbitMqListenerService : IHostedService, IAsyncDisposable
             VirtualHost = _options.VirtualHost,
         };
 
-        _connection = await factory.CreateConnectionAsync(cancellationToken).ConfigureAwait(false);
+        return factory.CreateConnectionAsync(cancellationToken);
+    }
 
-        // ── Publish channel ──────────────────────────────────────────────────
-        _publishChannel = await _connection.CreateChannelAsync(cancellationToken: cancellationToken)
+    private async Task SetupPublishChannelAsync(IConnection connection, CancellationToken cancellationToken)
+    {
+        _publishChannel = await connection.CreateChannelAsync(cancellationToken: cancellationToken)
             .ConfigureAwait(false);
 
         await _publishChannel.ExchangeDeclareAsync(
@@ -69,14 +128,23 @@ public sealed class RabbitMqListenerService : IHostedService, IAsyncDisposable
             cancellationToken: cancellationToken).ConfigureAwait(false);
 
         _backplane.SetPublishChannel(_publishChannel);
+    }
 
-        // ── Consume channel ──────────────────────────────────────────────────
-        _consumeChannel = await _connection.CreateChannelAsync(cancellationToken: cancellationToken)
+    private async Task SetupConsumeChannelAsync(IConnection connection, CancellationToken cancellationToken)
+    {
+        _consumeChannel = await connection.CreateChannelAsync(cancellationToken: cancellationToken)
             .ConfigureAwait(false);
 
+        var queueName = await DeclareAndBindQueueAsync(_consumeChannel, cancellationToken).ConfigureAwait(false);
+
+        await StartConsumingAsync(_consumeChannel, queueName, cancellationToken).ConfigureAwait(false);
+    }
+
+    private async Task<string> DeclareAndBindQueueAsync(IChannel channel, CancellationToken cancellationToken)
+    {
         // Exclusive, auto-delete queue — automatically removed when this instance disconnects.
         // Server generates a unique name so multiple instances don't share state.
-        var queueDeclare = await _consumeChannel.QueueDeclareAsync(
+        var queueDeclare = await channel.QueueDeclareAsync(
             queue: string.Empty,
             durable: false,
             exclusive: true,
@@ -85,22 +153,27 @@ public sealed class RabbitMqListenerService : IHostedService, IAsyncDisposable
 
         var queueName = queueDeclare.QueueName;
 
-        await _consumeChannel.QueueBindAsync(
+        await channel.QueueBindAsync(
             queue: queueName,
             exchange: _options.ExchangeName,
-            routingKey: string.Empty,   // fanout ignores routing key
+            routingKey: string.Empty, // fanout ignores routing key
             cancellationToken: cancellationToken).ConfigureAwait(false);
 
         _logger.LogInformation(
             "[RabbitMq] Listening on queue '{Queue}' bound to exchange '{Exchange}'",
             queueName, _options.ExchangeName);
 
-        var consumer = new AsyncEventingBasicConsumer(_consumeChannel);
+        return queueName;
+    }
+
+    private async Task StartConsumingAsync(IChannel channel, string queueName, CancellationToken cancellationToken)
+    {
+        var consumer = new AsyncEventingBasicConsumer(channel);
         consumer.ReceivedAsync += OnMessageReceivedAsync;
 
-        await _consumeChannel.BasicConsumeAsync(
+        await channel.BasicConsumeAsync(
             queue: queueName,
-            autoAck: true,      // fire-and-forget — no replay, no persistence
+            autoAck: true, // fire-and-forget — no replay, no persistence
             consumer: consumer,
             cancellationToken: cancellationToken).ConfigureAwait(false);
     }
@@ -152,37 +225,4 @@ public sealed class RabbitMqListenerService : IHostedService, IAsyncDisposable
             _logger.LogError(ex, "[RabbitMq] Error forwarding event id={Id}.", sseEvent.Id);
         }
     }
-
-    /// <inheritdoc />
-    public async Task StopAsync(CancellationToken cancellationToken)
-    {
-        _logger.LogInformation("[RabbitMq] Shutting down listener.");
-
-        if (_consumeChannel is not null)
-        {
-            try { await _consumeChannel.CloseAsync(cancellationToken).ConfigureAwait(false); }
-            catch (Exception ex) { _logger.LogError(ex, "[RabbitMq] Error closing consume channel."); }
-        }
-
-        if (_publishChannel is not null)
-        {
-            try { await _publishChannel.CloseAsync(cancellationToken).ConfigureAwait(false); }
-            catch (Exception ex) { _logger.LogError(ex, "[RabbitMq] Error closing publish channel."); }
-        }
-
-        if (_connection is not null)
-        {
-            try { await _connection.CloseAsync(cancellationToken).ConfigureAwait(false); }
-            catch (Exception ex) { _logger.LogError(ex, "[RabbitMq] Error closing connection."); }
-        }
-    }
-
-    /// <inheritdoc />
-    public async ValueTask DisposeAsync()
-    {
-        if (_consumeChannel is not null) await _consumeChannel.DisposeAsync().ConfigureAwait(false);
-        if (_publishChannel is not null) await _publishChannel.DisposeAsync().ConfigureAwait(false);
-        if (_connection is not null) await _connection.DisposeAsync().ConfigureAwait(false);
-    }
 }
-

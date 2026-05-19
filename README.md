@@ -9,6 +9,8 @@
 [![Downloads](https://img.shields.io/nuget/dt/ProbahoSSE.RedisPubSub?logo=nuget&label=downloads)](https://www.nuget.org/packages/ProbahoSSE.RedisPubSub)
 [![NuGet RedisStream](https://img.shields.io/nuget/v/ProbahoSSE.RedisStream?label=ProbahoSSE.RedisStream&logo=nuget)](https://www.nuget.org/packages/ProbahoSSE.RedisStream)
 [![Downloads](https://img.shields.io/nuget/dt/ProbahoSSE.RedisStream?logo=nuget&label=downloads)](https://www.nuget.org/packages/ProbahoSSE.RedisStream)
+[![NuGet RabbitMq](https://img.shields.io/nuget/v/ProbahoSSE.RabbitMq?label=ProbahoSSE.RabbitMq&logo=nuget)](https://www.nuget.org/packages/ProbahoSSE.RabbitMq)
+[![Downloads](https://img.shields.io/nuget/dt/ProbahoSSE.RabbitMq?logo=nuget&label=downloads)](https://www.nuget.org/packages/ProbahoSSE.RabbitMq)
 [![Build](https://github.com/ehtesam4m/ProbahoSSE/actions/workflows/build.yml/badge.svg)](https://github.com/ehtesam4m/ProbahoSSE/actions)
 [![License: MIT](https://img.shields.io/badge/license-MIT-blue.svg)](LICENSE)
 
@@ -30,6 +32,7 @@ ProbahoSSE is a lightweight .NET 10 library that adds multi-instance Server-Sent
   - [Core — ProbahoSSE](#core--probahosse)
   - [Pub/Sub Backplane — ProbahoSSE.RedisPubSub](#pubsub-backplane--probahosse-redispubsub)
   - [Persistent Stream Backplane — ProbahoSSE.RedisStream](#persistent-stream-backplane--probahosse-redisstream)
+  - [RabbitMQ Backplane — ProbahoSSE.RabbitMq](#rabbitmq-backplane--probahosse-rabbitmq)
   - [Bring Your Own Backplane](#bring-your-own-backplane)
 - [Configuration Reference](#configuration-reference)
 - [Samples](#samples)
@@ -101,6 +104,9 @@ dotnet add package ProbahoSSE.RedisPubSub
 
 # Option B — persistent stream with replay (ships with Redis Streams implementation)
 dotnet add package ProbahoSSE.RedisStream
+
+# Option C — fire-and-forget pub/sub backed by RabbitMQ
+dotnet add package ProbahoSSE.RabbitMq
 ```
 
 > **Using a different broker?** Implement `IProbahoSseBackplane` (and optionally `IProbahoSseReplayable`) and register it with `AddProbahoSse()`. See [Bring Your Own Backplane](#bring-your-own-backplane).
@@ -141,6 +147,24 @@ builder.Services
         redis.ConnectionString = builder.Configuration["Redis:ConnectionString"] ?? "localhost:6379";
         redis.ChannelPrefix    = "my-app";
         redis.StreamMaxLength  = 10_000;
+    });
+```
+
+**Option C — RabbitMQ backplane (fire-and-forget)**
+
+```csharp
+// Program.cs
+builder.Services
+    .AddProbahoSse(options =>
+    {
+        options.KeepAliveInterval = TimeSpan.FromSeconds(20);
+    })
+    .AddRabbitMqBackplane(rabbit =>
+    {
+        rabbit.HostName     = builder.Configuration["RabbitMq:HostName"] ?? "localhost";
+        rabbit.UserName     = builder.Configuration["RabbitMq:UserName"] ?? "guest";
+        rabbit.Password     = builder.Configuration["RabbitMq:Password"] ?? "guest";
+        rabbit.ExchangeName = "my-app";
     });
 ```
 
@@ -327,17 +351,40 @@ sequenceDiagram
 
 ---
 
+### RabbitMQ Backplane — ProbahoSSE.RabbitMq
+
+<a id="rabbitmq-backplane--probahosse-rabbitmq"></a>
+
+Ships with a **RabbitMQ fanout exchange** implementation. A single exchange fans out every message to all bound instance queues.
+
+```
+Publisher → RabbitMQ Fanout Exchange ("probaho")
+                  ↓                         ↓
+    [Queue: instance-A]         [Queue: instance-B]
+    exclusive · auto-delete     exclusive · auto-delete
+                  ↓                         ↓
+         API Instance A              API Instance B
+         local SSE clients           local SSE clients
+```
+
+- **Fire-and-forget** — no message persistence; offline consumers miss events permanently
+- Each instance gets an **exclusive, server-named, auto-delete queue** — cleaned up automatically on disconnect
+- `PublishToAllAsync` stamps events with `ProbahoSseGroups.Broadcast`; the listener broadcasts to all local connections
+- **Best for:** notification feeds, live dashboards, chat
+
+---
+
 ### Bring Your Own Backplane
 
 <a id="bring-your-own-backplane"></a>
 
 ```csharp
-public class RabbitMqBackplane : IProbahoSseBackplane
+public class MyCustomBackplane : IProbahoSseBackplane
 {
     public Task PublishToGroupAsync(string group, IProbahoSseEvent sseEvent,
         CancellationToken ct = default)
     {
-        // publish to RabbitMQ fanout exchange, routing key = group
+        // publish to your broker, routing key = group
     }
 
     public Task PublishToAllAsync(IProbahoSseEvent sseEvent,
@@ -353,11 +400,11 @@ Register it:
 ```csharp
 builder.Services
     .AddProbahoSse()
-    .AddSingleton<IProbahoSseBackplane, RabbitMqBackplane>()
-    .AddHostedService<RabbitMqListenerService>();
+    .AddSingleton<IProbahoSseBackplane, MyCustomBackplane>()
+    .AddHostedService<MyCustomListenerService>();
 ```
 
-Implement `IProbahoSseReplayable` on the same class to add replay support (e.g. backed by a RabbitMQ offset read or database query).
+Implement `IProbahoSseReplayable` on the same class to add replay support (e.g. backed by a database query or a log-structured broker).
 
 ---
 
@@ -389,6 +436,17 @@ Implement `IProbahoSseReplayable` on the same class to add replay support (e.g. 
 | `ChannelPrefix` | `string` | `"probaho"` | Prefix for Redis stream keys. Avoids collisions in a shared Redis instance. |
 | `StreamMaxLength` | `int` | `10 000` | Maximum entries retained. Older entries trimmed automatically. |
 | `StreamPollingIntervalMs` | `int` | `100` | Polling interval (ms) when no new messages are available. Lower = less latency, more Redis load. |
+
+### `RabbitMqOptions`
+
+| Property | Type | Default | Description |
+|---|---|---|---|
+| `HostName` | `string` | `"localhost"` | RabbitMQ host name. |
+| `Port` | `int` | `5672` | AMQP port. |
+| `UserName` | `string` | `"guest"` | RabbitMQ username. |
+| `Password` | `string` | `"guest"` | RabbitMQ password. |
+| `VirtualHost` | `string` | `"/"` | RabbitMQ virtual host. |
+| `ExchangeName` | `string` | `"probaho"` | Fanout exchange name. Shared across all instances. |
 
 ---
 
