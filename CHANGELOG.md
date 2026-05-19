@@ -6,6 +6,20 @@ The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/),
 
 ---
 
+## [0.3.0] - 2026-05-19
+
+### Added
+- **ProbahoSSE.RabbitMq** — new backplane package using a single RabbitMQ fanout exchange; each API instance gets an exclusive, auto-delete queue bound to the exchange on startup
+- `RabbitMqOptions` — configurable `HostName`, `Port`, `UserName`, `Password`, `VirtualHost`, and `ExchangeName`
+- `AddRabbitMqBackplane(...)` extension method on `IProbahoSseBuilder`, consistent with existing Redis backplane registration pattern
+- **Sample.RabbitMq** — new Docker Compose sample demonstrating two API instances behind nginx backed by RabbitMQ, including the RabbitMQ Management UI on port `15672`
+- Demo UI (`index.html`) updated to dynamically detect and display the active backplane name and icon — no longer hard-coded to Redis
+
+### Notes
+This release adds RabbitMQ as a first-class fire-and-forget backplane option alongside the existing Redis implementations. The architecture uses a single fanout exchange so all instances receive every message and filter locally — identical behaviour to `ProbahoSSE.RedisPubSub` but backed by RabbitMQ. No breaking changes to existing packages or public APIs.
+
+---
+
 ## [0.2.0] - 2026-05-14
 
 ### Changed
