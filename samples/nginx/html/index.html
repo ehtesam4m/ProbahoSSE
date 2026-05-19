@@ -190,15 +190,19 @@
 
     const infoBox = document.getElementById('infoBox');
     infoBox.className = `info-box ${isStream ? 'info-stream' : 'info-pubsub'}`;
+
+    const icons = { RedisPubSub: '🔴', RedisStream: '🔵', RabbitMQ: '🟠' };
+    const icon = icons[info.backplane] ?? '⚪';
+
     infoBox.innerHTML = isStream
-      ? `<strong>🔵 Redis Stream — Persistent + Replay</strong>
+      ? `<strong>${icon} ${info.displayName} — Persistent + Replay</strong>
          The browser's <code>EventSource</code> sends <code>Last-Event-ID</code> on every reconnect and the
          <strong>Stream backplane replays every missed event</strong> since that ID before resuming live delivery.
          Disconnect for a few seconds: on reconnect you will receive all missed sensor readings, in order,
          highlighted in purple below.`
-      : `<strong>🔴 Redis Pub/Sub — Fire &amp; Forget</strong>
+      : `<strong>${icon} ${info.displayName} — Fire &amp; Forget</strong>
          The browser's <code>EventSource</code> automatically sends <code>Last-Event-ID</code> on every reconnect,
-         but the <strong>Pub/Sub backplane has no memory</strong> — it only delivers to currently subscribed connections.
+         but the <strong>${escapeHtml(info.displayName)} backplane has no memory</strong> — it only delivers to currently subscribed connections.
          Disconnect for a few seconds and you will see a gap in event IDs, proving missed readings are permanently lost. However you can use your own persistent storage/queue to replay events from last event Id`;
 
     if (info.instance) {
