@@ -12,9 +12,6 @@ name: Release
 # Manual publish (workflow_dispatch):
 #   Provide an existing tag (e.g. v0.1.0) to publish it without creating a new tag.
 on:
-  push:
-    branches:
-      - main
   workflow_dispatch:
     inputs:
       tag:
