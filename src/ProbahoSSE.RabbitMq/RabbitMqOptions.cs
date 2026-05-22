@@ -1,3 +1,5 @@
+using RabbitMQ.Client;
+
 namespace ProbahoSSE.RabbitMq;
 
 /// <summary>
@@ -40,5 +42,25 @@ public sealed class RabbitMqOptions
     /// Default is "probaho".
     /// </summary>
     public string ExchangeName { get; set; } = "probaho";
+
+    /// <summary>
+    /// Optional callback to configure the underlying <see cref="ConnectionFactory"/>
+    /// before the <see cref="IConnection"/> is created.
+    /// Applied after the basic properties (<see cref="HostName"/>, <see cref="Port"/>,
+    /// <see cref="UserName"/>, <see cref="Password"/>, <see cref="VirtualHost"/>) are set,
+    /// so you can override any of them or add advanced settings such as SSL, heartbeat,
+    /// automatic recovery, or custom client properties.
+    /// </summary>
+    /// <example>
+    /// rabbit.ConfigureFactory = factory =>
+    /// {
+    ///     factory.RequestedHeartbeat        = TimeSpan.FromSeconds(30);
+    ///     factory.AutomaticRecoveryEnabled  = true;
+    ///     factory.NetworkRecoveryInterval   = TimeSpan.FromSeconds(10);
+    ///     factory.Ssl.Enabled               = true;
+    ///     factory.Ssl.ServerName            = "my-rabbit.example.com";
+    /// };
+    /// </example>
+    public Action<ConnectionFactory>? ConfigureFactory { get; set; }
 }
 

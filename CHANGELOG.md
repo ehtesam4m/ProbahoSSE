@@ -6,6 +6,17 @@ The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/),
 
 ---
 
+## [0.4.0] - 2026-05-22
+
+### Added
+- `ConfigureOptions` callback on `RedisPubSubOptions` and `RedisStreamOptions` — exposes the full StackExchange.Redis `ConfigurationOptions` object (SSL, timeouts, retry policy, reconnect behaviour, etc.)
+- `ConfigureFactory` callback on `RabbitMqOptions` — exposes the full `RabbitMQ.Client` `ConnectionFactory` object (heartbeat, automatic recovery, SSL, network recovery interval, etc.)
+
+### Notes
+All three backplane packages now give users full control over the underlying client configuration without losing the convenience of the simple fluent API. The callbacks are optional and applied after the base properties are set, so existing configurations require no changes. No breaking changes.
+
+---
+
 ## [0.3.0] - 2026-05-19
 
 ### Added

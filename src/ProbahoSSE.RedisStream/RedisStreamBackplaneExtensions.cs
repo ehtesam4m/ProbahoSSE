@@ -29,7 +29,9 @@ public static class RedisStreamBackplaneExtensions
         builder.Services.AddSingleton<IConnectionMultiplexer>(sp =>
         {
             var opts = sp.GetRequiredService<Microsoft.Extensions.Options.IOptions<RedisStreamOptions>>().Value;
-            return ConnectionMultiplexer.Connect(opts.ConnectionString);
+            var configOptions = ConfigurationOptions.Parse(opts.ConnectionString);
+            opts.ConfigureOptions?.Invoke(configOptions);
+            return ConnectionMultiplexer.Connect(configOptions);
         });
 
         builder.Services.AddSingleton<RedisStreamBackplane>();

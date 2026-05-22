@@ -28,7 +28,9 @@ public static class RedisPubSubBackplaneExtensions
         builder.Services.AddSingleton<IConnectionMultiplexer>(sp =>
         {
             var opts = sp.GetRequiredService<Microsoft.Extensions.Options.IOptions<RedisPubSubOptions>>().Value;
-            return ConnectionMultiplexer.Connect(opts.ConnectionString);
+            var configOptions = ConfigurationOptions.Parse(opts.ConnectionString);
+            opts.ConfigureOptions?.Invoke(configOptions);
+            return ConnectionMultiplexer.Connect(configOptions);
         });
 
         builder.Services.AddSingleton<RedisPubSubBackplane>();

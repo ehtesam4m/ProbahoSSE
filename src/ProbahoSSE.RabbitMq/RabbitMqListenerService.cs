@@ -112,6 +112,9 @@ public sealed class RabbitMqListenerService : IHostedService, IAsyncDisposable
             VirtualHost = _options.VirtualHost,
         };
 
+        // Apply any advanced ConnectionFactory settings supplied by the caller.
+        _options.ConfigureFactory?.Invoke(factory);
+
         return factory.CreateConnectionAsync(cancellationToken);
     }
 
