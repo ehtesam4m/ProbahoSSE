@@ -30,10 +30,20 @@ public static class SseEndpointHandler
 
         if (!manager.TryRegister(connection))
         {
+            logger.LogWarning(
+                "SSE connection rejected (429): group={Group} globalCount={GlobalCount} perGroupCount={PerGroupCount}",
+                group ?? "(none)",
+                manager.GetConnectionCount(),
+                group is not null ? manager.GetGroupConnectionCount(group) : 0);
+
             context.Response.StatusCode = StatusCodes.Status429TooManyRequests;
             await context.Response.WriteAsync("Too many connections.", context.RequestAborted);
             return;
         }
+
+        logger.LogDebug(
+            "SSE connection {ConnectionId} opened — group={Group} totalConnections={Total}",
+            connection.ConnectionId, group ?? "(none)", manager.GetConnectionCount());
 
         try
         {
@@ -59,6 +69,9 @@ public static class SseEndpointHandler
         finally
         {
             manager.Unregister(connection.ConnectionId);
+            logger.LogDebug(
+                "SSE connection {ConnectionId} closed — group={Group} totalConnections={Total}",
+                connection.ConnectionId, group ?? "(none)", manager.GetConnectionCount());
         }
     }
 

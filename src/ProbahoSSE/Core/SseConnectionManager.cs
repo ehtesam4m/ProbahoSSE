@@ -1,4 +1,5 @@
 using System.Collections.Concurrent;
+using Microsoft.Extensions.Logging;
 using Microsoft.Extensions.Options;
 using ProbahoSSE.Abstractions;
 using ProbahoSSE.Models;
@@ -28,11 +29,13 @@ public sealed class SseConnectionManager : IProbahoSseManager
     private readonly ConcurrentDictionary<string, ConcurrentDictionary<string, byte>> _groupIndex = new();
 
     private readonly ProbahoSseOptions _options;
+    private readonly ILogger<SseConnectionManager> _logger;
 
     /// <summary>Initializes the manager with the given options.</summary>
-    public SseConnectionManager(IOptions<ProbahoSseOptions> options)
+    public SseConnectionManager(IOptions<ProbahoSseOptions> options, ILogger<SseConnectionManager> logger)
     {
         _options = options.Value;
+        _logger = logger;
     }
 
     /// <inheritdoc />
@@ -48,7 +51,12 @@ public sealed class SseConnectionManager : IProbahoSseManager
     {
         // Check global limit
         if (_options.MaxGlobalConnections > 0 && _connections.Count >= _options.MaxGlobalConnections)
+        {
+            _logger.LogWarning(
+                "Global connection limit reached ({Limit}). Connection {ConnectionId} rejected.",
+                _options.MaxGlobalConnections, connection.ConnectionId);
             return false;
+        }
 
         // Check per-group limit — read directly from the index set count.
         // Note: there is an inherent TOCTOU window here between the read and the subsequent
@@ -61,11 +69,21 @@ public sealed class SseConnectionManager : IProbahoSseManager
                 ? existing.Count
                 : 0;
             if (groupCount >= _options.MaxConnectionsPerGroup)
+            {
+                _logger.LogWarning(
+                    "Per-group connection limit reached for group {Group} ({Limit}). Connection {ConnectionId} rejected.",
+                    connection.Group, _options.MaxConnectionsPerGroup, connection.ConnectionId);
                 return false;
+            }
         }
 
         if (!_connections.TryAdd(connection.ConnectionId, connection))
+        {
+            _logger.LogWarning(
+                "Duplicate connection ID {ConnectionId} — registration ignored.",
+                connection.ConnectionId);
             return false;
+        }
 
         if (connection.Group is not null)
         {
@@ -76,6 +94,10 @@ public sealed class SseConnectionManager : IProbahoSseManager
             set.TryAdd(connection.ConnectionId, 0);
         }
 
+        _logger.LogDebug(
+            "Connection {ConnectionId} registered — group={Group} total={Total}",
+            connection.ConnectionId, connection.Group ?? "(none)", _connections.Count);
+
         return true;
     }
 
@@ -85,29 +107,37 @@ public sealed class SseConnectionManager : IProbahoSseManager
         if (!_connections.TryRemove(connectionId, out var connection))
             return;
 
-        if (connection.Group is null)
-            return;
-
-        if (!_groupIndex.TryGetValue(connection.Group, out var set))
-            return;
-
-        set.TryRemove(connectionId, out _);
-
-        // Remove the group entry only when the set is empty AND still the same
-        // reference — guards against a concurrent TryRegister recreating the slot
-        // between our IsEmpty check and the outer Remove call.
-        if (set.IsEmpty)
+        if (connection.Group is not null && _groupIndex.TryGetValue(connection.Group, out var set))
         {
-            var pair = new KeyValuePair<string, ConcurrentDictionary<string, byte>>(connection.Group, set);
-            ((ICollection<KeyValuePair<string, ConcurrentDictionary<string, byte>>>)_groupIndex).Remove(pair);
+            set.TryRemove(connectionId, out _);
+
+            // Remove the group entry only when the set is empty AND still the same
+            // reference — guards against a concurrent TryRegister recreating the slot
+            // between our IsEmpty check and the outer Remove call.
+            if (set.IsEmpty)
+            {
+                var pair = new KeyValuePair<string, ConcurrentDictionary<string, byte>>(connection.Group, set);
+                ((ICollection<KeyValuePair<string, ConcurrentDictionary<string, byte>>>)_groupIndex).Remove(pair);
+            }
         }
+
+        _logger.LogDebug(
+            "Connection {ConnectionId} unregistered — group={Group} total={Total}",
+            connectionId, connection.Group ?? "(none)", _connections.Count);
     }
 
     /// <inheritdoc />
     public async Task BroadcastAsync(IProbahoSseEvent sseEvent, CancellationToken cancellationToken = default)
     {
         var tasks = _connections.Values.Select(c => c.SendAsync(sseEvent, cancellationToken).AsTask());
-        await Task.WhenAll(tasks).ConfigureAwait(false);
+        try
+        {
+            await Task.WhenAll(tasks).ConfigureAwait(false);
+        }
+        catch (Exception ex)
+        {
+            _logger.LogError(ex, "One or more errors occurred broadcasting event {EventId}.", sseEvent.Id);
+        }
     }
 
     /// <inheritdoc />
@@ -115,7 +145,10 @@ public sealed class SseConnectionManager : IProbahoSseManager
     {
         // O(group size) lookup via secondary index — no full scan of _connections.
         if (!_groupIndex.TryGetValue(group, out var ids) || ids.IsEmpty)
+        {
+            _logger.LogDebug("SendToGroupAsync: no local connections for group {Group} — skipped.", group);
             return;
+        }
 
         var tasks = ids.Keys
             .Select(id =>
@@ -126,6 +159,13 @@ public sealed class SseConnectionManager : IProbahoSseManager
                     : Task.CompletedTask;
             });
 
-        await Task.WhenAll(tasks).ConfigureAwait(false);
+        try
+        {
+            await Task.WhenAll(tasks).ConfigureAwait(false);
+        }
+        catch (Exception ex)
+        {
+            _logger.LogError(ex, "One or more errors occurred sending event {EventId} to group {Group}.", sseEvent.Id, group);
+        }
     }
 }
