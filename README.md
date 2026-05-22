@@ -129,6 +129,14 @@ builder.Services
     {
         redis.ConnectionString = builder.Configuration["Redis:ConnectionString"] ?? "localhost:6379";
         redis.ChannelPrefix    = "my-app";
+
+        // Optional: full control over the StackExchange.Redis ConfigurationOptions
+        redis.ConfigureOptions = opt =>
+        {
+            opt.ConnectTimeout       = 5_000;
+            opt.AbortOnConnectFail   = false;
+            opt.Ssl                  = true;
+        };
     });
 ```
 
@@ -146,6 +154,13 @@ builder.Services
         redis.ConnectionString = builder.Configuration["Redis:ConnectionString"] ?? "localhost:6379";
         redis.ChannelPrefix    = "my-app";
         redis.StreamMaxLength  = 10_000;
+
+        // Optional: full control over the StackExchange.Redis ConfigurationOptions
+        redis.ConfigureOptions = opt =>
+        {
+            opt.ConnectTimeout     = 5_000;
+            opt.AbortOnConnectFail = false;
+        };
     });
 ```
 
@@ -164,6 +179,14 @@ builder.Services
         rabbit.UserName     = builder.Configuration["RabbitMq:UserName"] ?? "guest";
         rabbit.Password     = builder.Configuration["RabbitMq:Password"] ?? "guest";
         rabbit.ExchangeName = "my-app";
+
+        // Optional: full control over the RabbitMQ.Client ConnectionFactory
+        rabbit.ConfigureFactory = factory =>
+        {
+            factory.RequestedHeartbeat       = TimeSpan.FromSeconds(30);
+            factory.AutomaticRecoveryEnabled = true;
+            factory.Ssl.Enabled             = true;
+        };
     });
 ```
 
@@ -426,6 +449,7 @@ Implement `IProbahoSseReplayable` on the same class to add replay support (e.g. 
 |---|---|---|---|
 | `ConnectionString` | `string` | `"localhost:6379"` | StackExchange.Redis connection string. |
 | `ChannelPrefix` | `string` | `"probaho"` | Prefix for Redis channel names. Avoids collisions in a shared Redis instance. |
+| `ConfigureOptions` | `Action<ConfigurationOptions>?` | `null` | Full access to the underlying StackExchange.Redis `ConfigurationOptions` — SSL, timeouts, retry policy, etc. Applied after `ConnectionString` is parsed. |
 
 ### `RedisStreamOptions`
 
@@ -435,6 +459,7 @@ Implement `IProbahoSseReplayable` on the same class to add replay support (e.g. 
 | `ChannelPrefix` | `string` | `"probaho"` | Prefix for Redis stream keys. Avoids collisions in a shared Redis instance. |
 | `StreamMaxLength` | `int` | `10 000` | Maximum entries retained. Older entries trimmed automatically. |
 | `StreamPollingIntervalMs` | `int` | `100` | Polling interval (ms) when no new messages are available. Lower = less latency, more Redis load. |
+| `ConfigureOptions` | `Action<ConfigurationOptions>?` | `null` | Full access to the underlying StackExchange.Redis `ConfigurationOptions` — SSL, timeouts, retry policy, etc. Applied after `ConnectionString` is parsed. |
 
 ### `RabbitMqOptions`
 
@@ -446,6 +471,7 @@ Implement `IProbahoSseReplayable` on the same class to add replay support (e.g. 
 | `Password` | `string` | `"guest"` | RabbitMQ password. |
 | `VirtualHost` | `string` | `"/"` | RabbitMQ virtual host. |
 | `ExchangeName` | `string` | `"probaho"` | Fanout exchange name. Shared across all instances. |
+| `ConfigureFactory` | `Action<ConnectionFactory>?` | `null` | Full access to the underlying `RabbitMQ.Client` `ConnectionFactory` — heartbeat, SSL, recovery, etc. Applied after the base properties are set. |
 
 ---
 
