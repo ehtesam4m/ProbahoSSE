@@ -379,14 +379,16 @@ sequenceDiagram
 
 Ships with a **RabbitMQ fanout exchange** implementation. A single exchange fans out every message to all bound instance queues.
 
-```
-Publisher → RabbitMQ Fanout Exchange ("probaho")
-                  ↓                         ↓
-    [Queue: instance-A]         [Queue: instance-B]
-    exclusive · auto-delete     exclusive · auto-delete
-                  ↓                         ↓
-         API Instance A              API Instance B
-         local SSE clients           local SSE clients
+```mermaid
+flowchart LR
+
+P[Publisher] --> E[RabbitMQ Fanout Exchange: probaho]
+
+E --> QA[Queue: instance-A\n(exclusive · auto-delete)]
+E --> QB[Queue: instance-B\n(exclusive · auto-delete)]
+
+QA --> A[API Instance A\nlocal SSE clients]
+QB --> B[API Instance B\nlocal SSE clients]
 ```
 
 - **Fire-and-forget** — no message persistence; offline consumers miss events permanently
@@ -576,13 +578,7 @@ Standalone HTTP producer — no knowledge of the backplane, just POSTs JSON to `
 
 ## Contributing
 
-<a id="contributing"></a>
-
-1. Fork the repo
-2. `git checkout -b feat/my-feature`
-3. Commit and open a PR against `main`
-
-Project targets **.NET 10**. Include unit tests (`tests/ProbahoSSE.Tests.Unit`) and, for backplane changes, integration tests (`tests/ProbahoSSE.Tests.Integration`) with Docker available.
+See the full contributing guide here: [CONTRIBUTING.md](CONTRIBUTING.md)
 
 ---
 
