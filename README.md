@@ -384,11 +384,11 @@ flowchart LR
 
 P[Publisher] --> E[RabbitMQ Fanout Exchange: probaho]
 
-E --> QA[Queue: instance-A\n(exclusive · auto-delete)]
-E --> QB[Queue: instance-B\n(exclusive · auto-delete)]
+E --> QA[Queue: instance-A<br/>exclusive, auto-delete]
+E --> QB[Queue: instance-B<br/>exclusive, auto-delete]
 
-QA --> A[API Instance A\nlocal SSE clients]
-QB --> B[API Instance B\nlocal SSE clients]
+QA --> A[API Instance A<br/>local SSE clients]
+QB --> B[API Instance B<br/>local SSE clients]
 ```
 
 - **Fire-and-forget** — no message persistence; offline consumers miss events permanently
