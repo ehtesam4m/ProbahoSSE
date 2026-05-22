@@ -11,7 +11,7 @@ var builder = WebApplication.CreateBuilder(args);
 // ── ProbahoSSE with Redis Pub/Sub backplane ──────────────────────────────────
 builder.Services.AddProbahoSse(options =>
     {
-        options.MaxConnectionsPerUser = 10;
+        options.MaxConnectionsPerGroup = 10;
         options.KeepAliveInterval = TimeSpan.FromSeconds(20);
     })
     .AddRedisPubSubBackplane(redis =>

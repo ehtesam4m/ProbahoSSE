@@ -309,7 +309,7 @@ Each API instance only talks to its own in-memory connection registry. The backp
 
 <a id="core--probahosse"></a>
 
-**`SseConnectionManager`** — flat `ConcurrentDictionary<connectionId, IProbahoSseConnection>` with a per-group counter dictionary. Avoids nested-dictionary concurrency footguns at the cost of a linear scan on `SendToGroupAsync` — acceptable for tens of thousands of connections.
+**`SseConnectionManager`** — primary `ConcurrentDictionary<connectionId, IProbahoSseConnection>` plus a secondary group index (`ConcurrentDictionary<group, ConcurrentDictionary<connectionId, byte>>`). `SendToGroupAsync` is O(group size) — only the connections in the target group are touched, regardless of total connection count. All mutations follow lock-free `GetOrAdd`/`TryRemove` rules with reference-equality group-entry cleanup to eliminate lost-update races under high concurrency.
 
 **`SseEndpointHandler`** — drives a single `IAsyncEnumerable<SseItem<string>>` via `TypedResults.ServerSentEvents`. Uses `Task.WhenAny(waitToReadTask, keepAliveTask)` so keep-alive fires even when no events arrive.
 

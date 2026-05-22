@@ -20,7 +20,7 @@ internal sealed class ConnectionManagerBuilder
         var options = Options.Create(new ProbahoSseOptions
         {
             MaxGlobalConnections = _maxGlobal,
-            MaxConnectionsPerUser = _maxPerUser
+            MaxConnectionsPerGroup = _maxPerUser
         });
         return new SseConnectionManager(options);
     }
