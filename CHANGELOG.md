@@ -6,6 +6,11 @@ The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/),
 
 ---
 
+## [0.5.0] - 2026-05-22
+
+### Notes
+Published during branch renaming. No functional changes.
+
 ## [0.4.0] - 2026-05-22
 
 ### Added
