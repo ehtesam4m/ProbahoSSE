@@ -28,6 +28,14 @@ public sealed record ProbahoSseEvent : Abstractions.IProbahoSseEvent
     public string? Group { get; init; }
 
     /// <summary>
+    /// W3C <c>traceparent</c> value captured at publish time.
+    /// Backplane listeners restore this as the parent span ID so delivery spans are linked
+    /// to the originating HTTP request even across a message-broker boundary.
+    /// </summary>
+    [JsonPropertyName("traceParent")]
+    public string? TraceParent { get; init; }
+
+    /// <summary>
     /// Creates a new <see cref="ProbahoSseEvent"/> with the specified data.
     /// </summary>
     /// <param name="data">The data payload.</param>

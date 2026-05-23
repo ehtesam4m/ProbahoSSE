@@ -1,3 +1,4 @@
+using System.Diagnostics;
 using Microsoft.Extensions.Hosting;
 using Microsoft.Extensions.Logging;
 using ProbahoSSE.Abstractions;
@@ -105,6 +106,15 @@ public sealed class RedisStreamListenerService : BackgroundService
                         continue;
                     }
 
+                    // Restore the trace context propagated from the publisher across the Redis boundary.
+                    using var activity = sseEvent.TraceParent is not null
+                        ? ProbahoSseTelemetry.ActivitySource.StartActivity("sse.backplane.receive", ActivityKind.Consumer, sseEvent.TraceParent)
+                        : ProbahoSseTelemetry.ActivitySource.StartActivity("sse.backplane.receive", ActivityKind.Consumer);
+                    activity?.SetTag("sse.backplane", "redis-stream");
+                    activity?.SetTag("sse.event_id", sseEvent.Id);
+                    activity?.SetTag("sse.group", group);
+                    activity?.SetTag("sse.stream_entry_id", entry.Id.ToString());
+
                     _logger.LogDebug(
                         "[RedisStream] Forwarding entry {EntryId} (event id={EventId}) group={Group} to local connections.",
                         entry.Id, sseEvent.Id, group);
@@ -118,6 +128,7 @@ public sealed class RedisStreamListenerService : BackgroundService
                     }
                     catch (Exception ex)
                     {
+                        activity?.SetStatus(ActivityStatusCode.Error, ex.Message);
                         _logger.LogError(ex, "[RedisStream] Error broadcasting entry {Id}.", entry.Id);
                     }
                 }

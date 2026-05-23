@@ -20,4 +20,11 @@ public interface IProbahoSseEvent
     /// <see cref="IProbahoSseManager.SendToGroupAsync"/>.
     /// </summary>
     string? Group { get; }
+
+    /// <summary>
+    /// W3C <c>traceparent</c> captured at publish time.
+    /// Backplane consumers use this to restore the parent span and link delivery traces
+    /// to the originating HTTP request across the message-broker boundary.
+    /// </summary>
+    string? TraceParent { get; }
 }

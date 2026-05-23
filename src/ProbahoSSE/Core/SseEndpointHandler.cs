@@ -1,3 +1,4 @@
+using System.Diagnostics;
 using System.Net.ServerSentEvents;
 using System.Runtime.CompilerServices;
 using Microsoft.AspNetCore.Http;
@@ -26,6 +27,13 @@ public static class SseEndpointHandler
         var options = context.RequestServices.GetRequiredService<IOptions<ProbahoSseOptions>>().Value;
         var logger = context.RequestServices.GetRequiredService<ILogger<SseConnection>>();
 
+        // Start a Server span that covers the full SSE connection lifetime.
+        // When OTel is configured, this automatically becomes a child of the
+        // ASP.NET Core HTTP span (Activity.Current at call time), keeping the same TraceId.
+        using var activity = ProbahoSseTelemetry.ActivitySource.StartActivity(
+            "sse.connection", ActivityKind.Server);
+        activity?.SetTag("sse.group", group ?? "(none)");
+
         using var connection = new SseConnection(group);
 
         if (!manager.TryRegister(connection))
@@ -36,10 +44,15 @@ public static class SseEndpointHandler
                 manager.GetConnectionCount(),
                 group is not null ? manager.GetGroupConnectionCount(group) : 0);
 
+            activity?.SetTag("http.status_code", 429);
+            activity?.SetStatus(ActivityStatusCode.Error, "Too many connections");
+
             context.Response.StatusCode = StatusCodes.Status429TooManyRequests;
             await context.Response.WriteAsync("Too many connections.", context.RequestAborted);
             return;
         }
+
+        activity?.SetTag("sse.connection_id", connection.ConnectionId);
 
         logger.LogDebug(
             "SSE connection {ConnectionId} opened — group={Group} totalConnections={Total}",
@@ -65,6 +78,7 @@ public static class SseEndpointHandler
         catch (Exception ex)
         {
             logger.LogError(ex, "Error in SSE connection {ConnectionId}", connection.ConnectionId);
+            activity?.SetStatus(ActivityStatusCode.Error, ex.Message);
         }
         finally
         {

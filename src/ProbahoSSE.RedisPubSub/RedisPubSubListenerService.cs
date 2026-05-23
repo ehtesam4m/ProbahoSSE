@@ -1,3 +1,4 @@
+using System.Diagnostics;
 using Microsoft.Extensions.Hosting;
 using Microsoft.Extensions.Logging;
 using ProbahoSSE.Abstractions;
@@ -67,6 +68,14 @@ public sealed class RedisPubSubListenerService : BackgroundService
                     continue;
                 }
 
+                // Restore the trace context propagated from the publisher across the Redis boundary.
+                using var activity = sseEvent.TraceParent is not null
+                    ? ProbahoSseTelemetry.ActivitySource.StartActivity("sse.backplane.receive", ActivityKind.Consumer, sseEvent.TraceParent)
+                    : ProbahoSseTelemetry.ActivitySource.StartActivity("sse.backplane.receive", ActivityKind.Consumer);
+                activity?.SetTag("sse.backplane", "redis-pubsub");
+                activity?.SetTag("sse.event_id", sseEvent.Id);
+                activity?.SetTag("sse.group", group);
+
                 _logger.LogDebug("[RedisPubSub] Received event id={Id} group={Group}, forwarding to local connections.",
                     sseEvent.Id, group);
 
@@ -80,6 +89,7 @@ public sealed class RedisPubSubListenerService : BackgroundService
                 catch (OperationCanceledException) { break; }
                 catch (Exception ex)
                 {
+                    activity?.SetStatus(ActivityStatusCode.Error, ex.Message);
                     _logger.LogError(ex, "[RedisPubSub] Error forwarding event.");
                 }
             }
