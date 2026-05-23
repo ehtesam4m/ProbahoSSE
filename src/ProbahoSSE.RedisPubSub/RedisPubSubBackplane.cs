@@ -1,5 +1,7 @@
+using System.Diagnostics;
 using Microsoft.Extensions.Logging;
 using Microsoft.Extensions.Options;
+using ProbahoSSE;
 using ProbahoSSE.Abstractions;
 using ProbahoSSE.Backplane;
 using ProbahoSSE.Models;
@@ -17,6 +19,7 @@ public sealed class RedisPubSubBackplane : IProbahoSseBackplane, IAsyncDisposabl
     private readonly IConnectionMultiplexer _redis;
     private readonly RedisPubSubOptions _options;
     private readonly ILogger<RedisPubSubBackplane> _logger;
+    private readonly ProbahoSseMetrics _metrics;
 
     /// <summary>The Redis channel name all instances publish/subscribe to.</summary>
     internal string ChannelName { get; }
@@ -25,11 +28,13 @@ public sealed class RedisPubSubBackplane : IProbahoSseBackplane, IAsyncDisposabl
     public RedisPubSubBackplane(
         IConnectionMultiplexer redis,
         IOptions<RedisPubSubOptions> options,
-        ILogger<RedisPubSubBackplane> logger)
+        ILogger<RedisPubSubBackplane> logger,
+        ProbahoSseMetrics metrics)
     {
         _redis = redis;
         _options = options.Value;
         _logger = logger;
+        _metrics = metrics;
         ChannelName = $"{_options.ChannelPrefix}:sse";
     }
 
@@ -57,7 +62,16 @@ public sealed class RedisPubSubBackplane : IProbahoSseBackplane, IAsyncDisposabl
         var payload = SseEventSerializer.Serialize(sseEvent);
         _logger.LogDebug("[PubSub] Publishing event id={Id} group={Group} to channel {Channel}",
             sseEvent.Id, sseEvent.Group, ChannelName);
-        await subscriber.PublishAsync(RedisChannel.Literal(ChannelName), payload).ConfigureAwait(false);
+
+        var start = Stopwatch.GetTimestamp();
+        try
+        {
+            await subscriber.PublishAsync(RedisChannel.Literal(ChannelName), payload).ConfigureAwait(false);
+        }
+        finally
+        {
+            _metrics.RecordPublish("redis-pubsub", Stopwatch.GetElapsedTime(start).TotalMilliseconds);
+        }
     }
 
     internal ISubscriber GetSubscriber() => _redis.GetSubscriber();

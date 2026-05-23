@@ -1,6 +1,8 @@
+using System.Diagnostics;
 using System.Text;
 using Microsoft.Extensions.Logging;
 using Microsoft.Extensions.Options;
+using ProbahoSSE;
 using ProbahoSSE.Abstractions;
 using ProbahoSSE.Backplane;
 using ProbahoSSE.Models;
@@ -17,6 +19,7 @@ public sealed class RabbitMqBackplane : IProbahoSseBackplane, IAsyncDisposable
 {
     private readonly RabbitMqOptions _options;
     private readonly ILogger<RabbitMqBackplane> _logger;
+    private readonly ProbahoSseMetrics _metrics;
 
     // Publish channel — initialised by RabbitMqListenerService.StartAsync before any request arrives.
     private IChannel? _publishChannel;
@@ -24,10 +27,12 @@ public sealed class RabbitMqBackplane : IProbahoSseBackplane, IAsyncDisposable
     /// <summary>Initializes the RabbitMQ backplane.</summary>
     public RabbitMqBackplane(
         IOptions<RabbitMqOptions> options,
-        ILogger<RabbitMqBackplane> logger)
+        ILogger<RabbitMqBackplane> logger,
+        ProbahoSseMetrics metrics)
     {
         _options = options.Value;
         _logger = logger;
+        _metrics = metrics;
     }
 
     /// <summary>
@@ -69,11 +74,19 @@ public sealed class RabbitMqBackplane : IProbahoSseBackplane, IAsyncDisposable
         _logger.LogDebug("[RabbitMq] Publishing event id={Id} group={Group} to exchange '{Exchange}'",
             sseEvent.Id, sseEvent.Group, _options.ExchangeName);
 
-        await _publishChannel.BasicPublishAsync(
-            exchange: _options.ExchangeName,
-            routingKey: string.Empty,   // fanout ignores routing key
-            body: body,
-            cancellationToken: cancellationToken).ConfigureAwait(false);
+        var start = Stopwatch.GetTimestamp();
+        try
+        {
+            await _publishChannel.BasicPublishAsync(
+                exchange: _options.ExchangeName,
+                routingKey: string.Empty,   // fanout ignores routing key
+                body: body,
+                cancellationToken: cancellationToken).ConfigureAwait(false);
+        }
+        finally
+        {
+            _metrics.RecordPublish("rabbitmq", Stopwatch.GetElapsedTime(start).TotalMilliseconds);
+        }
     }
 
     /// <inheritdoc />

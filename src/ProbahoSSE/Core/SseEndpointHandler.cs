@@ -26,6 +26,7 @@ public static class SseEndpointHandler
         var manager = context.RequestServices.GetRequiredService<IProbahoSseManager>();
         var options = context.RequestServices.GetRequiredService<IOptions<ProbahoSseOptions>>().Value;
         var logger = context.RequestServices.GetRequiredService<ILogger<SseConnection>>();
+        var metrics = context.RequestServices.GetRequiredService<ProbahoSseMetrics>();
 
         // Start a Server span that covers the full SSE connection lifetime.
         // When OTel is configured, this automatically becomes a child of the
@@ -46,6 +47,8 @@ public static class SseEndpointHandler
 
             activity?.SetTag("http.status_code", 429);
             activity?.SetStatus(ActivityStatusCode.Error, "Too many connections");
+
+            metrics.RecordConnectionRejected(group);
 
             context.Response.StatusCode = StatusCodes.Status429TooManyRequests;
             await context.Response.WriteAsync("Too many connections.", context.RequestAborted);

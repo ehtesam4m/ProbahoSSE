@@ -36,7 +36,9 @@ public sealed class RedisPubSubBackplaneTests : IAsyncLifetime
     private RedisPubSubBackplane MakeBackplane(string prefix = "test")
     {
         var opts = Options.Create(new RedisPubSubOptions { ChannelPrefix = prefix });
-        return new RedisPubSubBackplane(_mux, opts, NullLogger<RedisPubSubBackplane>.Instance);
+        var manager = new RecordingManager([]);
+        var metrics = new ProbahoSseMetrics(new TestMeterFactory(), manager);
+        return new RedisPubSubBackplane(_mux, opts, NullLogger<RedisPubSubBackplane>.Instance, metrics);
     }
 
     // ── Publish → Listener → Manager.BroadcastAsync ─────────────────────────
