@@ -7,7 +7,9 @@
   <ItemGroup>
     <FrameworkReference Include="Microsoft.AspNetCore.App" />
   </ItemGroup>
-  <!-- Packages already included via Microsoft.AspNetCore.App framework reference -->
+  <ItemGroup>
+    <InternalsVisibleTo Include="ProbahoSSE.Tests.Unit" />
+  </ItemGroup>
 </Project>
 
 

@@ -25,30 +25,40 @@ public sealed class ProbahoSseMetrics : IDisposable
     public const string MeterName = "ProbahoSSE";
 
     private readonly Meter _meter;
+
+    // ── Existing instruments (kept for backward compatibility) ────────────────
     private readonly Counter<long> _connectionsRejected;
     private readonly Counter<long> _eventsPublished;
     private readonly Histogram<double> _publishDuration;
 
+    // ── New instruments per plan ──────────────────────────────────────────────
+    private readonly Counter<long> _messagesSent;
+    private readonly Counter<long> _messagesFailed;
+
+    // ── Health-check state ─────────────────────────────────────────────────────
+    // Updated atomically; read by BackplaneHealthCheck without locks.
+    private volatile bool _lastPublishFailed;
+
     /// <summary>
     /// Initializes the metrics instruments.
     /// </summary>
-    /// <param name="meterFactory">
-    /// <see cref="IMeterFactory"/> from DI — respects DI lifetime, supports testing, and
-    /// ensures proper disposal. Prefer this over <c>new Meter(...)</c>.
-    /// </param>
-    /// <param name="manager">
-    /// Used by the <c>sse.connections.active</c> observable gauge to read the live count directly,
-    /// avoiding a separate counter that could drift out of sync.
-    /// </param>
+    /// <param name="meterFactory"><see cref="IMeterFactory"/> from DI.</param>
+    /// <param name="manager">Provides the live connection count for the observable gauge.</param>
     public ProbahoSseMetrics(IMeterFactory meterFactory, IProbahoSseManager manager)
     {
         _meter = meterFactory.Create(MeterName);
 
-        // ObservableGauge pulls the current value on demand — zero synchronization overhead.
+        // probahosse.connections.active — pulled on demand, no drift risk.
+        _meter.CreateObservableGauge(
+            name: "probahosse.connections.active",
+            observeValue: () => (long)manager.GetConnectionCount(),
+            description: "Number of currently active SSE connections.");
+
+        // Legacy name kept for backward compatibility.
         _meter.CreateObservableGauge(
             name: "sse.connections.active",
             observeValue: () => manager.GetConnectionCount(),
-            description: "Number of currently active SSE connections.");
+            description: "Number of currently active SSE connections (legacy name).");
 
         _connectionsRejected = _meter.CreateCounter<long>(
             name: "sse.connections.rejected",
@@ -56,40 +66,73 @@ public sealed class ProbahoSseMetrics : IDisposable
 
         _eventsPublished = _meter.CreateCounter<long>(
             name: "sse.events.published",
-            description: "Total events successfully published to the backplane.");
+            description: "Total events successfully published to the backplane (legacy name).");
 
         _publishDuration = _meter.CreateHistogram<double>(
             name: "sse.backplane.publish.duration",
             unit: "ms",
-            description: "Time taken to publish an event to the backplane (milliseconds). " +
-                         "Tagged with 'sse.backplane' (rabbitmq | redis-pubsub | redis-stream).");
+            description: "Publish latency in ms. Tagged with 'sse.backplane'.");
+
+
+        _messagesSent = _meter.CreateCounter<long>(
+            name: "probahosse.backplane.messages_sent",
+            description: "Total messages successfully published to the backplane.");
+
+        _messagesFailed = _meter.CreateCounter<long>(
+            name: "probahosse.backplane.messages_failed",
+            description: "Total publish attempts that threw an exception.");
     }
 
+    // ── Health-check state accessors (internal — not part of the public API) ──
+
     /// <summary>
-    /// Records a rejected SSE connection, tagged with the group name.
-    /// Called automatically by the built-in endpoint handler when a limit is enforced.
-    /// Custom endpoint handlers should also call this for consistent metrics.
+    /// <see langword="true"/> when the most recent publish attempt threw an exception.
+    /// Cleared automatically on the next successful publish.
     /// </summary>
+    internal bool LastPublishFailed => _lastPublishFailed;
+
+
+    // ── Public recording methods ───────────────────────────────────────────────
+
+    /// <summary>Records a rejected SSE connection.</summary>
     public void RecordConnectionRejected(string? group) =>
         _connectionsRejected.Add(1, new TagList { { "sse.group", group ?? "(none)" } });
 
     /// <summary>
-    /// Records a successful backplane publish with its latency.
-    /// Called automatically by each built-in backplane. Custom backplane implementations
-    /// should also call this so the shared meter captures all activity.
+    /// Records a successful backplane publish with its latency (legacy method).
+    /// Used by RabbitMQ and RedisStream backplanes.
     /// </summary>
-    /// <param name="backplane">Backplane identifier, e.g. <c>"rabbitmq"</c>, <c>"redis-pubsub"</c>, <c>"redis-stream"</c>.</param>
-    /// <param name="durationMs">Elapsed time in milliseconds for the publish operation.</param>
     public void RecordPublish(string backplane, double durationMs)
     {
         var tags = new TagList { { "sse.backplane", backplane } };
         _eventsPublished.Add(1, tags);
         _publishDuration.Record(durationMs, tags);
+
+        // Also update the new per-plan instruments.
+        _messagesSent.Add(1, tags);
+        _lastPublishFailed = false;
     }
+
+    /// <summary>
+    /// Records a successfully published message on the new <c>probahosse.*</c> instruments.
+    /// Preferred over <see cref="RecordPublish"/> for new backplane integrations.
+    /// </summary>
+    public void RecordMessageSent(string backplane)
+    {
+        var tags = new TagList { { "sse.backplane", backplane } };
+        _messagesSent.Add(1, tags);
+        _eventsPublished.Add(1, tags); // keep legacy in sync
+        _lastPublishFailed = false;
+    }
+
+    /// <summary>Records a failed publish attempt.</summary>
+    public void RecordMessageFailed(string backplane)
+    {
+        _messagesFailed.Add(1, new TagList { { "sse.backplane", backplane } });
+        _lastPublishFailed = true;
+    }
+
 
     /// <inheritdoc />
     public void Dispose() => _meter.Dispose();
 }
-
-
-

@@ -11,8 +11,20 @@ namespace ProbahoSSE.RedisPubSub;
 /// <summary>
 /// A <see cref="BackgroundService"/> that holds the long-lived Redis Pub/Sub subscription
 /// and forwards every received message to all locally connected SSE clients.
-/// This is the proper home for a subscription — not a fire-and-forget task or an infinite delay.
 /// </summary>
+/// <remarks>
+/// <para>
+/// Uses the <c>ChannelMessageQueue</c> pattern (SubscribeAsync → OnMessage) rather than
+/// the callback pattern, mirroring the approach used by ASP.NET Core SignalR's
+/// <c>RedisHubLifetimeManager</c>. StackExchange.Redis automatically re-attaches the queue
+/// to the channel after a connection drop, so no <c>ConnectionRestored</c> handler or
+/// manual re-subscribe logic is needed.
+/// </para>
+/// <para>
+/// On graceful shutdown the queue is unsubscribed via <c>queue.UnsubscribeAsync()</c>
+/// so that downstream pub/sub handlers are cleaned up before the process exits.
+/// </para>
+/// </remarks>
 public sealed class RedisPubSubListenerService : BackgroundService
 {
     private readonly RedisPubSubBackplane _backplane;
@@ -26,93 +38,88 @@ public sealed class RedisPubSubListenerService : BackgroundService
         ILogger<RedisPubSubListenerService> logger)
     {
         _backplane = backplane;
-        _manager = manager;
-        _logger = logger;
+        _manager   = manager;
+        _logger    = logger;
     }
 
     /// <inheritdoc />
     protected override async Task ExecuteAsync(CancellationToken stoppingToken)
     {
-        var subscriber = _backplane.GetSubscriber();
-        var channel = RedisChannel.Literal(_backplane.ChannelName);
+        var redisChannel = RedisChannel.Literal(_backplane.ChannelName);
+        var subscriber   = _backplane.GetSubscriber();
 
-        _logger.LogInformation("[RedisPubSub] Subscribing to channel '{Channel}'", _backplane.ChannelName);
+        _logger.LogInformation(
+            "[RedisPubSub] Subscribing to channel '{Channel}'", _backplane.ChannelName);
 
-        // Use the async-handler overload (Func<RedisChannel, RedisValue, Task>) to avoid
-        // blocking the StackExchange.Redis I/O callback thread when broadcasting to SSE clients.
-        var queue = await subscriber.SubscribeAsync(channel).ConfigureAwait(false);
+        // ChannelMessageQueue keeps the subscription alive across Redis reconnects
+        // automatically — no ConnectionRestored handler needed.
+        var queue = await subscriber.SubscribeAsync(redisChannel).ConfigureAwait(false);
 
-        // Process messages from the channel queue on the thread pool.
-        _ = Task.Run(async () =>
+        queue.OnMessage(async channelMessage =>
         {
-            await foreach (var msg in queue)
-            {
-                if (msg.Message.IsNullOrEmpty) continue;
+            await ProcessMessageAsync(channelMessage.Message).ConfigureAwait(false);
+        });
 
-                var sseEvent = SseEventSerializer.Deserialize(msg.Message!);
-                if (sseEvent is null)
-                {
-                    _logger.LogWarning("[RedisPubSub] Failed to deserialize incoming message.");
-                    continue;
-                }
+        _logger.LogInformation(
+            "[RedisPubSub] Subscribed to channel '{Channel}'", _backplane.ChannelName);
 
-                var group = sseEvent.Group;
-
-                if (string.IsNullOrEmpty(group))
-                {
-                    // No group set — drop to prevent accidental fan-out to all users.
-                    // Use PublishToAllAsync (sets Group = ProbahoSseGroups.Broadcast) for intentional broadcasts.
-                    _logger.LogWarning(
-                        "[RedisPubSub] Event id={Id} has no group — dropped to prevent data leak. " +
-                        "Call PublishToAllAsync for intentional fan-out.", sseEvent.Id);
-                    continue;
-                }
-
-                // Restore the trace context propagated from the publisher across the Redis boundary.
-                using var activity = sseEvent.TraceParent is not null
-                    ? ProbahoSseTelemetry.ActivitySource.StartActivity("sse.backplane.receive", ActivityKind.Consumer, sseEvent.TraceParent)
-                    : ProbahoSseTelemetry.ActivitySource.StartActivity("sse.backplane.receive", ActivityKind.Consumer);
-                activity?.SetTag("sse.backplane", "redis-pubsub");
-                activity?.SetTag("sse.event_id", sseEvent.Id);
-                activity?.SetTag("sse.group", group);
-
-                _logger.LogDebug("[RedisPubSub] Received event id={Id} group={Group}, forwarding to local connections.",
-                    sseEvent.Id, group);
-
-                try
-                {
-                    if (group == ProbahoSseGroups.Broadcast)
-                        await _manager.BroadcastAsync(sseEvent, stoppingToken).ConfigureAwait(false);
-                    else
-                        await _manager.SendToGroupAsync(group, sseEvent, stoppingToken).ConfigureAwait(false);
-                }
-                catch (OperationCanceledException) { break; }
-                catch (Exception ex)
-                {
-                    activity?.SetStatus(ActivityStatusCode.Error, ex.Message);
-                    _logger.LogError(ex, "[RedisPubSub] Error forwarding event.");
-                }
-            }
-        }, stoppingToken);
-
-        // Keep the hosted service alive until the application shuts down.
-        await Task.Delay(Timeout.Infinite, stoppingToken).ConfigureAwait(false);
-    }
-
-    /// <inheritdoc />
-    public override async Task StopAsync(CancellationToken cancellationToken)
-    {
-        _logger.LogInformation("[RedisPubSub] Unsubscribing from channel '{Channel}'.", _backplane.ChannelName);
+        // Hold until application shutdown.
         try
         {
-            var subscriber = _backplane.GetSubscriber();
-            await subscriber.UnsubscribeAsync(RedisChannel.Literal(_backplane.ChannelName)).ConfigureAwait(false);
+            await Task.Delay(Timeout.Infinite, stoppingToken).ConfigureAwait(false);
+        }
+        catch (OperationCanceledException) { }
+
+        // Clean shutdown — unsubscribe via the queue object, not the channel name.
+        _logger.LogInformation(
+            "[RedisPubSub] Unsubscribing from channel '{Channel}'", _backplane.ChannelName);
+        await queue.UnsubscribeAsync().ConfigureAwait(false);
+    }
+
+    // ── Message handling ──────────────────────────────────────────────────────
+
+    private async Task ProcessMessageAsync(RedisValue message)
+    {
+        if (message.IsNullOrEmpty) return;
+
+        var sseEvent = SseEventSerializer.Deserialize(message!);
+        if (sseEvent is null)
+        {
+            _logger.LogWarning("[RedisPubSub] Failed to deserialize incoming message.");
+            return;
+        }
+
+        var group = sseEvent.Group;
+
+        if (string.IsNullOrEmpty(group))
+        {
+            _logger.LogWarning(
+                "[RedisPubSub] Event id={Id} has no group — dropped to prevent data leak. " +
+                "Call PublishToAllAsync for intentional fan-out.", sseEvent.Id);
+            return;
+        }
+
+        using var activity = sseEvent.TraceParent is not null
+            ? ProbahoSseTelemetry.ActivitySource.StartActivity("sse.backplane.receive", ActivityKind.Consumer, sseEvent.TraceParent)
+            : ProbahoSseTelemetry.ActivitySource.StartActivity("sse.backplane.receive", ActivityKind.Consumer);
+        activity?.SetTag("sse.backplane", "redis-pubsub");
+        activity?.SetTag("sse.event_id", sseEvent.Id);
+        activity?.SetTag("sse.group", group);
+
+        _logger.LogDebug("[RedisPubSub] Received event id={Id} group={Group}, forwarding to local connections.",
+            sseEvent.Id, group);
+
+        try
+        {
+            if (group == ProbahoSseGroups.Broadcast)
+                await _manager.BroadcastAsync(sseEvent).ConfigureAwait(false);
+            else
+                await _manager.SendToGroupAsync(group, sseEvent).ConfigureAwait(false);
         }
         catch (Exception ex)
         {
-            _logger.LogError(ex, "[RedisPubSub] Error during unsubscribe on shutdown.");
+            activity?.SetStatus(ActivityStatusCode.Error, ex.Message);
+            _logger.LogError(ex, "[RedisPubSub] Error forwarding event.");
         }
-
-        await base.StopAsync(cancellationToken);
     }
 }
