@@ -314,8 +314,7 @@ Each API instance only talks to its own in-memory connection registry. The backp
 
 <a id="core--probahosse"></a>
 
-**`SseConnectionManager`** — primary `ConcurrentDictionary<connectionId, IProbahoSseConnection>` plus a secondary group index (`ConcurrentDictionary<group, ConcurrentDictionary<connectionId, byte>>`). `SendToGroupAsync` is O(group size) — only the connections in the target group are touched, regardless of total connection count. All mutations follow lock-free `GetOrAdd`/`TryRemove` rules with reference-equality group-entry cleanup to eliminate lost-update races under high concurrency.
-
+**`SseConnectionManager`** — each SSE connection owns a `Channel<IProbahoSseEvent>` as its async event queue. Publishing to a group writes to the `Channel` of each connection in that group; `SseEndpointHandler` reads from it via `IAsyncEnumerable` and streams events to the browser. Routing is backed by two `ConcurrentDictionary` maps: one from connection ID → `IProbahoSseConnection` (individual lookups and broadcast), and a second from group name → set of connection IDs (so a group send only iterates that group's connections, not the entire pool). Thread safety comes from `ConcurrentDictionary`'s built-in compare-and-swap operations — reads and writes across concurrent request threads never need an explicit `lock`, and the channel writer/reader pair is single-producer/single-consumer by design, so no additional synchronisation is required there either.
 **`SseEndpointHandler`** — drives a single `IAsyncEnumerable<SseItem<string>>` via `TypedResults.ServerSentEvents`. Uses `Task.WhenAny(waitToReadTask, keepAliveTask)` so keep-alive fires even when no events arrive.
 
 **`IProbahoSseBackplane`** — the contract every backplane must implement. Exposes `PublishToGroupAsync` and `PublishToAllAsync`. Implement `IProbahoSseReplayable` to enable `Last-Event-ID` replay.
@@ -568,7 +567,7 @@ ProbahoSSE registers a named health check (`"probahosse-backplane"`) that reflec
 builder.Services
     .AddProbahoSse(...)
     .AddRedisPubSubBackplane(...)   // or whichever backplane
-    .AddProbahoSseHealthCheck();   // registers the health check
+    .AddHealthCheck();   // registers the health check
 
 // Map the endpoint
 app.MapHealthChecks("/health");
