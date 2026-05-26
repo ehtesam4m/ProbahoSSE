@@ -1,3 +1,4 @@
+using Microsoft.Extensions.Logging.Abstractions;
 using Microsoft.Extensions.Options;
 using ProbahoSSE.Core;
 using ProbahoSSE.Models;
@@ -20,9 +21,8 @@ internal sealed class ConnectionManagerBuilder
         var options = Options.Create(new ProbahoSseOptions
         {
             MaxGlobalConnections = _maxGlobal,
-            MaxConnectionsPerUser = _maxPerUser
+            MaxConnectionsPerGroup = _maxPerUser
         });
-        return new SseConnectionManager(options);
+        return new SseConnectionManager(options, NullLogger<SseConnectionManager>.Instance);
     }
 }
-

@@ -1,5 +1,7 @@
+using System.Diagnostics;
 using Microsoft.Extensions.Logging;
 using Microsoft.Extensions.Options;
+using ProbahoSSE;
 using ProbahoSSE.Abstractions;
 using ProbahoSSE.Backplane;
 using ProbahoSSE.Models;
@@ -18,6 +20,7 @@ public sealed class RedisStreamBackplane : IProbahoSseBackplane, IProbahoSseRepl
     private readonly IConnectionMultiplexer _redis;
     private readonly RedisStreamOptions _options;
     private readonly ILogger<RedisStreamBackplane> _logger;
+    private readonly ProbahoSseMetrics _metrics;
 
     internal string StreamKey { get; }
 
@@ -25,11 +28,13 @@ public sealed class RedisStreamBackplane : IProbahoSseBackplane, IProbahoSseRepl
     public RedisStreamBackplane(
         IConnectionMultiplexer redis,
         IOptions<RedisStreamOptions> options,
-        ILogger<RedisStreamBackplane> logger)
+        ILogger<RedisStreamBackplane> logger,
+        ProbahoSseMetrics metrics)
     {
         _redis = redis;
         _options = options.Value;
         _logger = logger;
+        _metrics = metrics;
         StreamKey = $"{_options.ChannelPrefix}:stream";
     }
 
@@ -62,11 +67,19 @@ public sealed class RedisStreamBackplane : IProbahoSseBackplane, IProbahoSseRepl
         _logger.LogDebug("[RedisStream] Publishing event id={Id} group={Group} to stream {Stream}",
             sseEvent.Id, sseEvent.Group, StreamKey);
 
-        await db.StreamAddAsync(
-            StreamKey,
-            [new NameValueEntry("payload", payload)],
-            maxLength: _options.StreamMaxLength,
-            useApproximateMaxLength: true).ConfigureAwait(false);
+        var start = Stopwatch.GetTimestamp();
+        try
+        {
+            await db.StreamAddAsync(
+                StreamKey,
+                [new NameValueEntry("payload", payload)],
+                maxLength: _options.StreamMaxLength,
+                useApproximateMaxLength: true).ConfigureAwait(false);
+        }
+        finally
+        {
+            _metrics.RecordPublish("redis-stream", Stopwatch.GetElapsedTime(start).TotalMilliseconds);
+        }
     }
 
     /// <inheritdoc />

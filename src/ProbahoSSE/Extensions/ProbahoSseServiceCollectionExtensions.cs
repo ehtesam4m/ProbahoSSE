@@ -28,7 +28,14 @@ public static class ProbahoSseServiceCollectionExtensions
         services.AddSingleton<SseConnectionManager>();
         services.AddSingleton<IProbahoSseManager>(sp => sp.GetRequiredService<SseConnectionManager>());
 
+        // IMeterFactory is registered by AddMetrics() which ASP.NET Core calls automatically,
+        // but we call it explicitly here so ProbahoSSE works in non-web host scenarios too.
+        services.AddMetrics();
+        services.AddSingleton<ProbahoSseMetrics>();
+
         return new ProbahoSseBuilder(services);
     }
 }
+
+
 

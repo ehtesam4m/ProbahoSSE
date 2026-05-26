@@ -34,8 +34,9 @@ public sealed class RabbitMqBackplaneTests : IAsyncLifetime
             ExchangeName = exchange
         });
 
-        var backplane = new RabbitMqBackplane(opts, NullLogger<RabbitMqBackplane>.Instance);
         var manager   = new RecordingManager(store);
+        var metrics   = new ProbahoSseMetrics(new TestMeterFactory(), manager);
+        var backplane = new RabbitMqBackplane(opts, NullLogger<RabbitMqBackplane>.Instance, metrics);
         var listener  = new RabbitMqListenerService(
             backplane, manager, opts, NullLogger<RabbitMqListenerService>.Instance);
 

@@ -203,5 +203,90 @@ public sealed class SseConnectionManagerTests
         var manager = new ConnectionManagerBuilder().Build();
         await manager.SendToGroupAsync("ghost", ProbahoSseEvent.Create("nobody home"));
     }
+
+    [Fact]
+    public async Task SendToGroupAsync_AfterUnregister_DoesNotDeliverToRemovedConnection()
+    {
+        var manager = new ConnectionManagerBuilder().Build();
+        var alice = new StubConnection(group: "alice");
+        manager.TryRegister(alice);
+        manager.Unregister(alice.ConnectionId);
+
+        await manager.SendToGroupAsync("alice", ProbahoSseEvent.Create("late event"));
+
+        Assert.Empty(alice.Received);
+    }
+
+    // ── Group index correctness ───────────────────────────────────────────────
+
+    [Fact]
+    public void GroupIndex_PopulatedOnRegister()
+    {
+        var manager = new ConnectionManagerBuilder().Build();
+        var conn = new StubConnection(group: "alice");
+        manager.TryRegister(conn);
+
+        // Group count is the observable proxy for the index being maintained
+        Assert.Equal(1, manager.GetGroupConnectionCount("alice"));
+    }
+
+    [Fact]
+    public void GroupIndex_CleanedUpWhenLastMemberUnregisters()
+    {
+        var manager = new ConnectionManagerBuilder().Build();
+        var conn = new StubConnection(group: "alice");
+        manager.TryRegister(conn);
+        manager.Unregister(conn.ConnectionId);
+
+        Assert.Equal(0, manager.GetGroupConnectionCount("alice"));
+    }
+
+    [Fact]
+    public void GroupIndex_PartialUnregister_RemainingMembersStillTracked()
+    {
+        var manager = new ConnectionManagerBuilder().Build();
+        var alice1 = new StubConnection(group: "alice");
+        var alice2 = new StubConnection(group: "alice");
+        manager.TryRegister(alice1);
+        manager.TryRegister(alice2);
+        manager.Unregister(alice1.ConnectionId);
+
+        Assert.Equal(1, manager.GetGroupConnectionCount("alice"));
+    }
+
+    [Fact]
+    public async Task GroupIndex_ReRegisterAfterFullUnregister_DeliversCorrectly()
+    {
+        var manager = new ConnectionManagerBuilder().Build();
+        var alice1 = new StubConnection(group: "alice");
+        manager.TryRegister(alice1);
+        manager.Unregister(alice1.ConnectionId);
+
+        // Re-register a new connection to the same group
+        var alice2 = new StubConnection(group: "alice");
+        manager.TryRegister(alice2);
+
+        await manager.SendToGroupAsync("alice", ProbahoSseEvent.Create("back again"));
+
+        Assert.Single(alice2.Received);
+        Assert.Empty(alice1.Received);
+    }
+
+    [Fact]
+    public async Task GroupIndex_ConcurrentRegisterUnregister_NoCrash()
+    {
+        // Smoke test: hammering concurrent add/remove/send should not throw
+        var manager = new ConnectionManagerBuilder().Build();
+
+        var tasks = Enumerable.Range(0, 200).Select(async i =>
+        {
+            var conn = new StubConnection(group: i % 5 == 0 ? "alice" : "bob");
+            manager.TryRegister(conn);
+            await manager.SendToGroupAsync(conn.Group!, ProbahoSseEvent.Create("ping"));
+            manager.Unregister(conn.ConnectionId);
+        });
+
+        await Task.WhenAll(tasks); // must not throw
+    }
 }
 

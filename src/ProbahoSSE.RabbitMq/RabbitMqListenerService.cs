@@ -1,3 +1,4 @@
+using System.Diagnostics;
 using System.Text;
 using Microsoft.Extensions.Hosting;
 using Microsoft.Extensions.Logging;
@@ -212,6 +213,14 @@ public sealed class RabbitMqListenerService : IHostedService, IAsyncDisposable
             return;
         }
 
+        // Restore the trace context propagated from the publisher across the RabbitMQ boundary.
+        using var activity = sseEvent.TraceParent is not null
+            ? ProbahoSseTelemetry.ActivitySource.StartActivity(ProbahoSseTelemetry.Activities.BackplaneReceive, ActivityKind.Consumer, sseEvent.TraceParent)
+            : ProbahoSseTelemetry.ActivitySource.StartActivity(ProbahoSseTelemetry.Activities.BackplaneReceive, ActivityKind.Consumer);
+        activity?.SetTag(ProbahoSseTelemetry.Tags.Backplane, "rabbitmq");
+        activity?.SetTag(ProbahoSseTelemetry.Tags.EventId, sseEvent.Id);
+        activity?.SetTag(ProbahoSseTelemetry.Tags.Group, group);
+
         _logger.LogDebug(
             "[RabbitMq] Received event id={Id} group={Group}, forwarding to local connections.",
             sseEvent.Id, group);
@@ -225,6 +234,7 @@ public sealed class RabbitMqListenerService : IHostedService, IAsyncDisposable
         }
         catch (Exception ex)
         {
+            activity?.SetStatus(ActivityStatusCode.Error, ex.Message);
             _logger.LogError(ex, "[RabbitMq] Error forwarding event id={Id}.", sseEvent.Id);
         }
     }

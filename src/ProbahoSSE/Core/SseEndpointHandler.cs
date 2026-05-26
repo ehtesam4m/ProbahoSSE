@@ -1,3 +1,4 @@
+using System.Diagnostics;
 using System.Net.ServerSentEvents;
 using System.Runtime.CompilerServices;
 using Microsoft.AspNetCore.Http;
@@ -25,15 +26,40 @@ public static class SseEndpointHandler
         var manager = context.RequestServices.GetRequiredService<IProbahoSseManager>();
         var options = context.RequestServices.GetRequiredService<IOptions<ProbahoSseOptions>>().Value;
         var logger = context.RequestServices.GetRequiredService<ILogger<SseConnection>>();
+        var metrics = context.RequestServices.GetRequiredService<ProbahoSseMetrics>();
+
+        // Start a Server span that covers the full SSE connection lifetime.
+        // When OTel is configured, this automatically becomes a child of the
+        // ASP.NET Core HTTP span (Activity.Current at call time), keeping the same TraceId.
+        using var activity = ProbahoSseTelemetry.ActivitySource.StartActivity(
+            ProbahoSseTelemetry.Activities.Connection, ActivityKind.Server);
+        activity?.SetTag(ProbahoSseTelemetry.Tags.Group, group ?? "(none)");
 
         using var connection = new SseConnection(group);
 
         if (!manager.TryRegister(connection))
         {
+            logger.LogWarning(
+                "SSE connection rejected (429): group={Group} globalCount={GlobalCount} perGroupCount={PerGroupCount}",
+                group ?? "(none)",
+                manager.GetConnectionCount(),
+                group is not null ? manager.GetGroupConnectionCount(group) : 0);
+
+            activity?.SetTag("http.status_code", 429);
+            activity?.SetStatus(ActivityStatusCode.Error, "Too many connections");
+
+            metrics.RecordConnectionRejected(group);
+
             context.Response.StatusCode = StatusCodes.Status429TooManyRequests;
             await context.Response.WriteAsync("Too many connections.", context.RequestAborted);
             return;
         }
+
+        activity?.SetTag(ProbahoSseTelemetry.Tags.ConnectionId, connection.ConnectionId);
+
+        logger.LogDebug(
+            "SSE connection {ConnectionId} opened — group={Group} totalConnections={Total}",
+            connection.ConnectionId, group ?? "(none)", manager.GetConnectionCount());
 
         try
         {
@@ -55,10 +81,14 @@ public static class SseEndpointHandler
         catch (Exception ex)
         {
             logger.LogError(ex, "Error in SSE connection {ConnectionId}", connection.ConnectionId);
+            activity?.SetStatus(ActivityStatusCode.Error, ex.Message);
         }
         finally
         {
             manager.Unregister(connection.ConnectionId);
+            logger.LogDebug(
+                "SSE connection {ConnectionId} closed — group={Group} totalConnections={Total}",
+                connection.ConnectionId, group ?? "(none)", manager.GetConnectionCount());
         }
     }
 

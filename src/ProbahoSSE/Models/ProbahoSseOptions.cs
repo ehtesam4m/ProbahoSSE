@@ -6,16 +6,16 @@ namespace ProbahoSSE.Models;
 public sealed class ProbahoSseOptions
 {
     /// <summary>
-    /// Gets or sets the maximum number of concurrent SSE connections across all users.
+    /// Gets or sets the maximum number of concurrent SSE connections across all groups.
     /// Set to 0 for unlimited. Default is 0.
     /// </summary>
     public int MaxGlobalConnections { get; set; } = 10000;
 
     /// <summary>
-    /// Gets or sets the maximum number of concurrent SSE connections per user.
+    /// Gets or sets the maximum number of concurrent SSE connections per group.
     /// Set to 0 for unlimited. Default is 10.
     /// </summary>
-    public int MaxConnectionsPerUser { get; set; } = 10;
+    public int MaxConnectionsPerGroup { get; set; } = 10;
 
     /// <summary>
     /// Gets or sets the default event type used when an event has no explicit type.

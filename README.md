@@ -35,6 +35,11 @@ ProbahoSSE is a lightweight .NET 10 library that adds multi-instance Server-Sent
   - [RabbitMQ Backplane — ProbahoSSE.RabbitMq](#rabbitmq-backplane--probahosse-rabbitmq)
   - [Bring Your Own Backplane](#bring-your-own-backplane)
 - [Configuration Reference](#configuration-reference)
+- [Observability](#observability)
+  - [Distributed Tracing (OpenTelemetry)](#distributed-tracing-opentelemetry)
+  - [Metrics](#metrics)
+  - [Health Check](#health-check)
+  - [Tag & Activity Name Constants](#tag--activity-name-constants)
 - [Samples](#samples)
     - [Sample.RedisPubSub — Fire & Forget](#sampleredispubsub--fire--forget)
     - [Sample.RedisStream — Persistent + Replay](#sampleredisstream--persistent--replay)
@@ -309,7 +314,7 @@ Each API instance only talks to its own in-memory connection registry. The backp
 
 <a id="core--probahosse"></a>
 
-**`SseConnectionManager`** — flat `ConcurrentDictionary<connectionId, IProbahoSseConnection>` with a per-group counter dictionary. Avoids nested-dictionary concurrency footguns at the cost of a linear scan on `SendToGroupAsync` — acceptable for tens of thousands of connections.
+**`SseConnectionManager`** — primary `ConcurrentDictionary<connectionId, IProbahoSseConnection>` plus a secondary group index (`ConcurrentDictionary<group, ConcurrentDictionary<connectionId, byte>>`). `SendToGroupAsync` is O(group size) — only the connections in the target group are touched, regardless of total connection count. All mutations follow lock-free `GetOrAdd`/`TryRemove` rules with reference-equality group-entry cleanup to eliminate lost-update races under high concurrency.
 
 **`SseEndpointHandler`** — drives a single `IAsyncEnumerable<SseItem<string>>` via `TypedResults.ServerSentEvents`. Uses `Task.WhenAny(waitToReadTask, keepAliveTask)` so keep-alive fires even when no events arrive.
 
@@ -474,6 +479,140 @@ Implement `IProbahoSseReplayable` on the same class to add replay support (e.g. 
 | `VirtualHost` | `string` | `"/"` | RabbitMQ virtual host. |
 | `ExchangeName` | `string` | `"probaho"` | Fanout exchange name. Shared across all instances. |
 | `ConfigureFactory` | `Action<ConnectionFactory>?` | `null` | Full access to the underlying `RabbitMQ.Client` `ConnectionFactory` — heartbeat, SSL, recovery, etc. Applied after the base properties are set. |
+
+---
+
+## Observability
+
+<a id="observability"></a>
+
+ProbahoSSE ships first-class support for **distributed tracing**, **metrics**, and a **health check endpoint** — all built on standard .NET APIs with zero mandatory dependencies. Everything is opt-in: if no listener is registered, all instrumentation is a no-op with near-zero overhead.
+
+---
+
+### Distributed Tracing (OpenTelemetry)
+
+<a id="distributed-tracing-opentelemetry"></a>
+
+ProbahoSSE emits spans via `System.Diagnostics.ActivitySource` under the source name **`ProbahoSSE`**. Spans are automatically linked to the incoming HTTP trace so every SSE connection and every backplane delivery appears as a child of the originating request in your trace viewer (Jaeger, Zipkin, Azure Monitor, etc.).
+
+**Spans emitted**
+
+| Span name | Kind | When |
+|---|---|---|
+| `sse.connection` | `Server` | Entire lifetime of one SSE HTTP connection |
+| `sse.broadcast` | `Internal` | Each broadcast to all local connections |
+| `sse.send_to_group` | `Internal` | Each targeted send to a group |
+| `sse.backplane.receive` | `Consumer` | Each message received from the backplane (all three backplanes) |
+
+**Setup**
+
+```csharp
+builder.Services.AddOpenTelemetry()
+    .WithTracing(t => t
+        .AddSource(ProbahoSseTelemetry.SourceName)   // "ProbahoSSE"
+        .AddAspNetCoreInstrumentation()
+        .AddOtlpExporter());
+```
+
+> **No OTel configured?** `ActivitySource.StartActivity` returns `null` when no listener is attached — no exceptions, no allocations.
+
+**Trace propagation across the backplane**
+
+When a publisher calls `PublishToGroupAsync`, the current `Activity.Id` (W3C `traceparent`) is embedded in the serialised event payload as `TraceParent`. The backplane listener restores it as the parent context when it starts the `sse.backplane.receive` span, so the full publish→backplane→deliver chain is visible as a single distributed trace.
+
+---
+
+### Metrics
+
+<a id="metrics"></a>
+
+ProbahoSSE uses `System.Diagnostics.Metrics` (the same foundation as OpenTelemetry Metrics) via `IMeterFactory`. The meter name is **`ProbahoSSE`**.
+
+**Instruments**
+
+| Instrument | Type | Tags | Description |
+|---|---|---|---|
+| `probahosse.connections.active` | ObservableGauge&lt;long&gt; | — | Number of currently active SSE connections |
+| `sse.connections.rejected` | Counter&lt;long&gt; | `sse.group` | Connections rejected due to limit enforcement (429) |
+| `probahosse.backplane.messages_sent` | Counter&lt;long&gt; | `sse.backplane` | Total messages successfully published to the backplane |
+| `probahosse.backplane.messages_failed` | Counter&lt;long&gt; | `sse.backplane` | Total publish attempts that threw an exception |
+| `sse.backplane.publish.duration` | Histogram&lt;double&gt; (ms) | `sse.backplane` | Publish latency in milliseconds |
+
+**Setup — OpenTelemetry Metrics**
+
+```csharp
+builder.Services.AddOpenTelemetry()
+    .WithMetrics(m => m
+        .AddMeter(ProbahoSseMetrics.MeterName)   // "ProbahoSSE"
+        .AddPrometheusExporter());               // or AddOtlpExporter()
+```
+
+**Setup — dotnet-counters (no code change needed)**
+
+```bash
+dotnet counters monitor --counters ProbahoSSE --process-id <pid>
+```
+
+The `sse.backplane` tag value is `"redis-pubsub"`, `"redis-stream"`, or `"rabbitmq"` depending on which backplane is active, so you can filter/aggregate per backplane in your dashboards.
+
+---
+
+### Health Check
+
+<a id="health-check"></a>
+
+ProbahoSSE registers a named health check (`"probahosse-backplane"`) that reflects the backplane publish state. Register it alongside ASP.NET Core Health Checks:
+
+```csharp
+builder.Services
+    .AddProbahoSse(...)
+    .AddRedisPubSubBackplane(...)   // or whichever backplane
+    .AddProbahoSseHealthCheck();   // registers the health check
+
+// Map the endpoint
+app.MapHealthChecks("/health");
+```
+
+**Status logic**
+
+| Status | Condition |
+|---|---|
+| `Healthy` | No publish failures recorded since last successful publish |
+| `Unhealthy` | The most recent publish attempt threw an exception |
+
+The check clears automatically on the next successful publish — no manual reset needed.
+
+---
+
+### Tag & Activity Name Constants
+
+<a id="tag--activity-name-constants"></a>
+
+All span names and tag key strings used by ProbahoSSE are exposed as typed constants so you can reference them safely in your own OTel pipelines, processors, or tests — no magic strings.
+
+```csharp
+// Activity (span) names
+ProbahoSseTelemetry.Activities.Connection        // "sse.connection"
+ProbahoSseTelemetry.Activities.Broadcast         // "sse.broadcast"
+ProbahoSseTelemetry.Activities.SendToGroup       // "sse.send_to_group"
+ProbahoSseTelemetry.Activities.BackplaneReceive  // "sse.backplane.receive"
+
+// Tag keys
+ProbahoSseTelemetry.Tags.EventId              // "sse.event_id"
+ProbahoSseTelemetry.Tags.Group               // "sse.group"
+ProbahoSseTelemetry.Tags.ConnectionId        // "sse.connection_id"
+ProbahoSseTelemetry.Tags.ConnectionCount     // "sse.connection_count"
+ProbahoSseTelemetry.Tags.GroupConnectionCount // "sse.group_connection_count"
+ProbahoSseTelemetry.Tags.Backplane           // "sse.backplane"
+ProbahoSseTelemetry.Tags.StreamEntryId       // "sse.stream_entry_id"
+
+// Meter name
+ProbahoSseMetrics.MeterName  // "ProbahoSSE"
+
+// ActivitySource name
+ProbahoSseTelemetry.SourceName  // "ProbahoSSE"
+```
 
 ---
 

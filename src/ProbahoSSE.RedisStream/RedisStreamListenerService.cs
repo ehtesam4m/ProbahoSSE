@@ -1,3 +1,4 @@
+using System.Diagnostics;
 using Microsoft.Extensions.Hosting;
 using Microsoft.Extensions.Logging;
 using ProbahoSSE.Abstractions;
@@ -49,11 +50,15 @@ public sealed class RedisStreamListenerService : BackgroundService
             var info = await db.StreamInfoAsync(_backplane.StreamKey).ConfigureAwait(false);
             _lastId = info.LastEntry.Id.ToString();
         }
-        catch
+        catch (RedisServerException ex)
         {
-            // Stream doesn't exist yet — start from the very beginning.
+            _logger.LogWarning(ex,
+                "[RedisStream] Could not read stream info for '{Key}' " +
+                "(stream may not exist yet) — starting from 0-0.", _backplane.StreamKey);
             _lastId = "0-0";
         }
+        // Any other exception (RedisConnectionException, RedisTimeoutException, etc.) propagates
+        // so the BackgroundService host can restart with proper backoff.
 
         _logger.LogInformation("[RedisStream] Starting from stream position {LastId}.", _lastId);
 
@@ -105,6 +110,17 @@ public sealed class RedisStreamListenerService : BackgroundService
                         continue;
                     }
 
+                    // Restore the trace context propagated from the publisher across the Redis boundary.
+                    using var activity = sseEvent.TraceParent is not null
+                        ? ProbahoSseTelemetry.ActivitySource.StartActivity(ProbahoSseTelemetry.Activities.BackplaneReceive,
+                            ActivityKind.Consumer, sseEvent.TraceParent)
+                        : ProbahoSseTelemetry.ActivitySource.StartActivity(ProbahoSseTelemetry.Activities.BackplaneReceive,
+                            ActivityKind.Consumer);
+                    activity?.SetTag(ProbahoSseTelemetry.Tags.Backplane, "redis-stream");
+                    activity?.SetTag(ProbahoSseTelemetry.Tags.EventId, sseEvent.Id);
+                    activity?.SetTag(ProbahoSseTelemetry.Tags.Group, group);
+                    activity?.SetTag(ProbahoSseTelemetry.Tags.StreamEntryId, entry.Id.ToString());
+
                     _logger.LogDebug(
                         "[RedisStream] Forwarding entry {EntryId} (event id={EventId}) group={Group} to local connections.",
                         entry.Id, sseEvent.Id, group);
@@ -118,6 +134,7 @@ public sealed class RedisStreamListenerService : BackgroundService
                     }
                     catch (Exception ex)
                     {
+                        activity?.SetStatus(ActivityStatusCode.Error, ex.Message);
                         _logger.LogError(ex, "[RedisStream] Error broadcasting entry {Id}.", entry.Id);
                     }
                 }

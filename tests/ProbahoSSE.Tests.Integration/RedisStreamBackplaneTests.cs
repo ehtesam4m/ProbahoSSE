@@ -40,7 +40,9 @@ public sealed class RedisStreamBackplaneTests : IAsyncLifetime
             ChannelPrefix = prefix,
             StreamMaxLength = 1000
         });
-        return new RedisStreamBackplane(_mux, opts, NullLogger<RedisStreamBackplane>.Instance);
+        var manager = new RecordingManager([]);
+        var metrics = new ProbahoSseMetrics(new TestMeterFactory(), manager);
+        return new RedisStreamBackplane(_mux, opts, NullLogger<RedisStreamBackplane>.Instance, metrics);
     }
 
     // ── Publish → Listener → BroadcastAsync ─────────────────────────────────
