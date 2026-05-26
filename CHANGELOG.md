@@ -6,6 +6,36 @@ The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/),
 
 ---
 
+## [1.0.0] - 2026-05-26
+
+First stable release of **ProbahoSSE**. All public APIs are considered stable and will follow semantic versioning from this point forward.
+
+### Added
+- **Core library — `ProbahoSSE`**
+  - `IProbahoSsePublisher` / `IProbahoSseManager` — primary public API for publishing events and managing connections
+  - `SseConnectionManager` — thread-safe in-memory connection registry using `Channel<IProbahoSseEvent>` per connection for async pub/sub delivery, backed by two `ConcurrentDictionary` maps for O(group size) group-targeted dispatch
+  - `SseEndpointHandler` — drives `TypedResults.ServerSentEvents` via `IAsyncEnumerable<SseItem<string>>`; keep-alive frames sent on a separate timer via `Task.WhenAny` so quiet periods don't drop proxied connections
+  - `IProbahoSseBackplane` / `IProbahoSseReplayable` — pluggable backplane contracts; implement either to connect any message broker
+  - Global and per-group connection limits with `429` responses on breach
+  - `event: connected` frame sent immediately on stream open
+  - Fluent `AddProbahoSse(...)` registration with `IProbahoSseBuilder` for chained backplane setup
+
+- **`ProbahoSSE.RedisPubSub`** — fire-and-forget backplane using Redis Pub/Sub (`StackExchange.Redis`); uses `ChannelMessageQueue` / `queue.OnMessage` for automatic reconnect handling without app-level resurrection logic
+- **`ProbahoSSE.RedisStream`** — persistent backplane using Redis Streams with `Last-Event-ID` replay; each instance independently polls via `XREAD` — no consumer groups, no stale state on autoscaling
+- **`ProbahoSSE.RabbitMq`** — fire-and-forget backplane using a single RabbitMQ fanout exchange; each instance gets an exclusive, server-named, auto-delete queue that is cleaned up automatically on disconnect
+- **`ProbahoSSE.Backplane`** — shared serialisation and abstractions consumed by all three backplane packages
+- **Full client configuration exposure** — `ConfigureOptions` (`Action<ConfigurationOptions>`) on both Redis backplane options; `ConfigureFactory` (`Action<ConnectionFactory>`) on `RabbitMqOptions` — full control over the underlying client without losing the convenience API
+- **OpenTelemetry distributed tracing** — `ActivitySource` (`"ProbahoSSE"`) emits `sse.connection`, `sse.broadcast`, `sse.send_to_group`, and `sse.backplane.receive` spans. `TraceParent` field in the serialised event propagates W3C trace context across the backplane boundary so the full publish→deliver chain appears as one distributed trace
+- **Metrics via `IMeterFactory`** — meter `"ProbahoSSE"` with five instruments: `probahosse.connections.active` (ObservableGauge), `sse.connections.rejected` (Counter), `probahosse.backplane.messages_sent` (Counter), `probahosse.backplane.messages_failed` (Counter), `sse.backplane.publish.duration` (Histogram). Compatible with OpenTelemetry Metrics and `dotnet counters`
+- **Backplane health check** — `AddProbahoSseHealthCheck()` registers a named `IHealthCheck` (`"probahosse-backplane"`) reporting `Unhealthy` on publish failure, self-clearing on next successful publish
+- **OTel constants** — `ProbahoSseTelemetry.Activities` and `ProbahoSseTelemetry.Tags` expose all span names and tag key strings as typed constants; `ProbahoSseMetrics.MeterName` and `ProbahoSseTelemetry.SourceName` for OTel registration
+- **Samples** — three fully self-contained Docker Compose samples (`Sample.RedisPubSub`, `Sample.RedisStream`, `Sample.RabbitMq`) each with two API instances, nginx load balancer, `Common.IoTSensorSimulator`, and a dark-themed browser UI at `http://localhost:8080` that auto-detects the active backplane and highlights replayed events
+
+### Notes
+This release graduates the library from pre-release (`0.x`) to stable (`1.0.0`). No breaking changes from `0.6.0`. All public interfaces, extension methods, and option types are source-compatible. The `0.x` releases are considered deprecated.
+
+---
+
 ## [0.6.0] - 2026-05-26
 
 ### Added
