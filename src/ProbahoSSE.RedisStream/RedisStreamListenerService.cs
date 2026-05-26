@@ -50,11 +50,15 @@ public sealed class RedisStreamListenerService : BackgroundService
             var info = await db.StreamInfoAsync(_backplane.StreamKey).ConfigureAwait(false);
             _lastId = info.LastEntry.Id.ToString();
         }
-        catch
+        catch (RedisServerException ex)
         {
-            // Stream doesn't exist yet — start from the very beginning.
+            _logger.LogWarning(ex,
+                "[RedisStream] Could not read stream info for '{Key}' " +
+                "(stream may not exist yet) — starting from 0-0.", _backplane.StreamKey);
             _lastId = "0-0";
         }
+        // Any other exception (RedisConnectionException, RedisTimeoutException, etc.) propagates
+        // so the BackgroundService host can restart with proper backoff.
 
         _logger.LogInformation("[RedisStream] Starting from stream position {LastId}.", _lastId);
 
@@ -108,8 +112,10 @@ public sealed class RedisStreamListenerService : BackgroundService
 
                     // Restore the trace context propagated from the publisher across the Redis boundary.
                     using var activity = sseEvent.TraceParent is not null
-                        ? ProbahoSseTelemetry.ActivitySource.StartActivity("sse.backplane.receive", ActivityKind.Consumer, sseEvent.TraceParent)
-                        : ProbahoSseTelemetry.ActivitySource.StartActivity("sse.backplane.receive", ActivityKind.Consumer);
+                        ? ProbahoSseTelemetry.ActivitySource.StartActivity("sse.backplane.receive",
+                            ActivityKind.Consumer, sseEvent.TraceParent)
+                        : ProbahoSseTelemetry.ActivitySource.StartActivity("sse.backplane.receive",
+                            ActivityKind.Consumer);
                     activity?.SetTag("sse.backplane", "redis-stream");
                     activity?.SetTag("sse.event_id", sseEvent.Id);
                     activity?.SetTag("sse.group", group);
