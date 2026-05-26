@@ -112,14 +112,14 @@ public sealed class RedisStreamListenerService : BackgroundService
 
                     // Restore the trace context propagated from the publisher across the Redis boundary.
                     using var activity = sseEvent.TraceParent is not null
-                        ? ProbahoSseTelemetry.ActivitySource.StartActivity("sse.backplane.receive",
+                        ? ProbahoSseTelemetry.ActivitySource.StartActivity(ProbahoSseTelemetry.Activities.BackplaneReceive,
                             ActivityKind.Consumer, sseEvent.TraceParent)
-                        : ProbahoSseTelemetry.ActivitySource.StartActivity("sse.backplane.receive",
+                        : ProbahoSseTelemetry.ActivitySource.StartActivity(ProbahoSseTelemetry.Activities.BackplaneReceive,
                             ActivityKind.Consumer);
-                    activity?.SetTag("sse.backplane", "redis-stream");
-                    activity?.SetTag("sse.event_id", sseEvent.Id);
-                    activity?.SetTag("sse.group", group);
-                    activity?.SetTag("sse.stream_entry_id", entry.Id.ToString());
+                    activity?.SetTag(ProbahoSseTelemetry.Tags.Backplane, "redis-stream");
+                    activity?.SetTag(ProbahoSseTelemetry.Tags.EventId, sseEvent.Id);
+                    activity?.SetTag(ProbahoSseTelemetry.Tags.Group, group);
+                    activity?.SetTag(ProbahoSseTelemetry.Tags.StreamEntryId, entry.Id.ToString());
 
                     _logger.LogDebug(
                         "[RedisStream] Forwarding entry {EntryId} (event id={EventId}) group={Group} to local connections.",

@@ -215,11 +215,11 @@ public sealed class RabbitMqListenerService : IHostedService, IAsyncDisposable
 
         // Restore the trace context propagated from the publisher across the RabbitMQ boundary.
         using var activity = sseEvent.TraceParent is not null
-            ? ProbahoSseTelemetry.ActivitySource.StartActivity("sse.backplane.receive", ActivityKind.Consumer, sseEvent.TraceParent)
-            : ProbahoSseTelemetry.ActivitySource.StartActivity("sse.backplane.receive", ActivityKind.Consumer);
-        activity?.SetTag("sse.backplane", "rabbitmq");
-        activity?.SetTag("sse.event_id", sseEvent.Id);
-        activity?.SetTag("sse.group", group);
+            ? ProbahoSseTelemetry.ActivitySource.StartActivity(ProbahoSseTelemetry.Activities.BackplaneReceive, ActivityKind.Consumer, sseEvent.TraceParent)
+            : ProbahoSseTelemetry.ActivitySource.StartActivity(ProbahoSseTelemetry.Activities.BackplaneReceive, ActivityKind.Consumer);
+        activity?.SetTag(ProbahoSseTelemetry.Tags.Backplane, "rabbitmq");
+        activity?.SetTag(ProbahoSseTelemetry.Tags.EventId, sseEvent.Id);
+        activity?.SetTag(ProbahoSseTelemetry.Tags.Group, group);
 
         _logger.LogDebug(
             "[RabbitMq] Received event id={Id} group={Group}, forwarding to local connections.",

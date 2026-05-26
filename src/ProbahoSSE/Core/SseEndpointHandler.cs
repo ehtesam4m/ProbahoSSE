@@ -32,8 +32,8 @@ public static class SseEndpointHandler
         // When OTel is configured, this automatically becomes a child of the
         // ASP.NET Core HTTP span (Activity.Current at call time), keeping the same TraceId.
         using var activity = ProbahoSseTelemetry.ActivitySource.StartActivity(
-            "sse.connection", ActivityKind.Server);
-        activity?.SetTag("sse.group", group ?? "(none)");
+            ProbahoSseTelemetry.Activities.Connection, ActivityKind.Server);
+        activity?.SetTag(ProbahoSseTelemetry.Tags.Group, group ?? "(none)");
 
         using var connection = new SseConnection(group);
 
@@ -55,7 +55,7 @@ public static class SseEndpointHandler
             return;
         }
 
-        activity?.SetTag("sse.connection_id", connection.ConnectionId);
+        activity?.SetTag(ProbahoSseTelemetry.Tags.ConnectionId, connection.ConnectionId);
 
         logger.LogDebug(
             "SSE connection {ConnectionId} opened — group={Group} totalConnections={Total}",

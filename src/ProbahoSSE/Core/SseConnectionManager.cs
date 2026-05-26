@@ -130,9 +130,9 @@ public sealed class SseConnectionManager : IProbahoSseManager
     /// <inheritdoc />
     public async Task BroadcastAsync(IProbahoSseEvent sseEvent, CancellationToken cancellationToken = default)
     {
-        using var activity = ProbahoSseTelemetry.ActivitySource.StartActivity("sse.broadcast");
-        activity?.SetTag("sse.event_id", sseEvent.Id);
-        activity?.SetTag("sse.connection_count", _connections.Count);
+        using var activity = ProbahoSseTelemetry.ActivitySource.StartActivity(ProbahoSseTelemetry.Activities.Broadcast);
+        activity?.SetTag(ProbahoSseTelemetry.Tags.EventId, sseEvent.Id);
+        activity?.SetTag(ProbahoSseTelemetry.Tags.ConnectionCount, _connections.Count);
 
         var tasks = _connections.Values.Select(c => c.SendAsync(sseEvent, cancellationToken).AsTask());
         try
@@ -149,9 +149,9 @@ public sealed class SseConnectionManager : IProbahoSseManager
     /// <inheritdoc />
     public async Task SendToGroupAsync(string group, IProbahoSseEvent sseEvent, CancellationToken cancellationToken = default)
     {
-        using var activity = ProbahoSseTelemetry.ActivitySource.StartActivity("sse.send_to_group");
-        activity?.SetTag("sse.group", group);
-        activity?.SetTag("sse.event_id", sseEvent.Id);
+        using var activity = ProbahoSseTelemetry.ActivitySource.StartActivity(ProbahoSseTelemetry.Activities.SendToGroup);
+        activity?.SetTag(ProbahoSseTelemetry.Tags.Group, group);
+        activity?.SetTag(ProbahoSseTelemetry.Tags.EventId, sseEvent.Id);
 
         // O(group size) lookup via secondary index — no full scan of _connections.
         if (!_groupIndex.TryGetValue(group, out var ids) || ids.IsEmpty)
@@ -160,7 +160,7 @@ public sealed class SseConnectionManager : IProbahoSseManager
             return;
         }
 
-        activity?.SetTag("sse.group_connection_count", ids.Count);
+        activity?.SetTag(ProbahoSseTelemetry.Tags.GroupConnectionCount, ids.Count);
 
         var tasks = ids.Keys
             .Select(id =>

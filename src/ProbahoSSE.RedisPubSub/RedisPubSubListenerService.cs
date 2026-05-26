@@ -100,11 +100,11 @@ public sealed class RedisPubSubListenerService : BackgroundService
         }
 
         using var activity = sseEvent.TraceParent is not null
-            ? ProbahoSseTelemetry.ActivitySource.StartActivity("sse.backplane.receive", ActivityKind.Consumer, sseEvent.TraceParent)
-            : ProbahoSseTelemetry.ActivitySource.StartActivity("sse.backplane.receive", ActivityKind.Consumer);
-        activity?.SetTag("sse.backplane", "redis-pubsub");
-        activity?.SetTag("sse.event_id", sseEvent.Id);
-        activity?.SetTag("sse.group", group);
+            ? ProbahoSseTelemetry.ActivitySource.StartActivity(ProbahoSseTelemetry.Activities.BackplaneReceive, ActivityKind.Consumer, sseEvent.TraceParent)
+            : ProbahoSseTelemetry.ActivitySource.StartActivity(ProbahoSseTelemetry.Activities.BackplaneReceive, ActivityKind.Consumer);
+        activity?.SetTag(ProbahoSseTelemetry.Tags.Backplane, "redis-pubsub");
+        activity?.SetTag(ProbahoSseTelemetry.Tags.EventId, sseEvent.Id);
+        activity?.SetTag(ProbahoSseTelemetry.Tags.Group, group);
 
         _logger.LogDebug("[RedisPubSub] Received event id={Id} group={Group}, forwarding to local connections.",
             sseEvent.Id, group);
